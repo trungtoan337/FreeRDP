@@ -310,7 +310,7 @@ static VideoFrame* VideoFrame_new(VideoClientContextPriv* priv, PresentationCont
 	frame->h = surface->alignedHeight;
 	frame->scanline = surface->scanline;
 
-	frame->surfaceData = BufferPool_Take(priv->surfacePool, frame->scanline * frame->h * 1ull);
+	frame->surfaceData = BufferPool_Take(priv->surfacePool, 1ull * frame->scanline * frame->h);
 	if (!frame->surfaceData)
 		goto fail;
 
@@ -710,7 +710,7 @@ static void video_timer(VideoClientContext* video, UINT64 now)
 	presentation = frame->presentation;
 
 	priv->publishedFrames++;
-	memcpy(presentation->surface->data, frame->surfaceData, frame->scanline * frame->h * 1ull);
+	memcpy(presentation->surface->data, frame->surfaceData, 1ull * frame->scanline * frame->h);
 
 	WINPR_ASSERT(video->showSurface);
 	video->showSurface(video, presentation->surface, presentation->ScaledWidth,
@@ -1165,7 +1165,7 @@ static UINT video_plugin_terminated(IWTSPlugin* pPlugin)
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT video_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
+FREERDP_ENTRY_POINT(UINT video_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints))
 {
 	UINT error = CHANNEL_RC_OK;
 	VIDEO_PLUGIN* videoPlugin;

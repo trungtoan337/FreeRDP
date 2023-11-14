@@ -5503,7 +5503,7 @@ static BOOL RunTestPlanar(BITMAP_PLANAR_CONTEXT* planar, const BYTE* srcBitmap,
 	BYTE* compressedBitmap = freerdp_bitmap_compress_planar(planar, srcBitmap, srcFormat, width,
 	                                                        height, 0, NULL, &dstSize);
 	BYTE* decompressedBitmap = (BYTE*)calloc(height, width * FreeRDPGetBytesPerPixel(dstFormat));
-	printf("%s [%s] --> [%s]: ", __FUNCTION__, FreeRDPGetColorFormatName(srcFormat),
+	printf("%s [%s] --> [%s]: ", __func__, FreeRDPGetColorFormatName(srcFormat),
 	       FreeRDPGetColorFormatName(dstFormat));
 	fflush(stdout);
 	printf("TODO: Skipping unfinished test!");
@@ -5543,7 +5543,7 @@ static BOOL RunTestPlanarSingleColor(BITMAP_PLANAR_CONTEXT* planar, const UINT32
 {
 	UINT32 i, j, x, y;
 	BOOL rc = FALSE;
-	printf("%s: [%s] --> [%s]: ", __FUNCTION__, FreeRDPGetColorFormatName(srcFormat),
+	printf("%s: [%s] --> [%s]: ", __func__, FreeRDPGetColorFormatName(srcFormat),
 	       FreeRDPGetColorFormatName(dstFormat));
 	fflush(stdout);
 
@@ -5656,7 +5656,7 @@ static UINT32 prand(UINT32 max)
 	UINT32 tmp;
 	if (max <= 1)
 		return 1;
-	winpr_RAND((BYTE*)&tmp, sizeof(tmp));
+	winpr_RAND(&tmp, sizeof(tmp));
 	return tmp % (max - 1) + 1;
 }
 

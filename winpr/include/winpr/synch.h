@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <winpr/platform.h>
 #include <winpr/winpr.h>
 #include <winpr/wtypes.h>
 #include <winpr/error.h>
@@ -109,7 +110,7 @@ extern "C"
 	WINPR_API BOOL ResetEvent(HANDLE hEvent);
 
 #if defined(WITH_DEBUG_EVENTS)
-#define DumpEventHandles() DumpEventHandles_(__FUNCTION__, __FILE__, __LINE__)
+#define DumpEventHandles() DumpEventHandles_(__func__, __FILE__, __LINE__)
 	WINPR_API void DumpEventHandles_(const char* fkt, const char* file, size_t line);
 #endif
 #ifdef UNICODE
@@ -174,17 +175,17 @@ extern "C"
 
 	/* Wait */
 
-#define INFINITE 0xFFFFFFFF
+#define INFINITE 0xFFFFFFFFUL
 
-#define WAIT_OBJECT_0 0x00000000L
-#define WAIT_ABANDONED 0x00000080L
-#define WAIT_IO_COMPLETION 0x000000C0L
+#define WAIT_OBJECT_0 0x00000000UL
+#define WAIT_ABANDONED 0x00000080UL
+#define WAIT_IO_COMPLETION 0x000000C0UL
 
 #ifndef WAIT_TIMEOUT
-#define WAIT_TIMEOUT 0x00000102L
+#define WAIT_TIMEOUT 0x00000102UL
 #endif
 
-#define WAIT_FAILED ((DWORD)0xFFFFFFFF)
+#define WAIT_FAILED 0xFFFFFFFFUL
 
 #define MAXIMUM_WAIT_OBJECTS 64
 
@@ -299,17 +300,13 @@ extern "C"
 	InitializeCriticalSectionAndSpinCount(lpCriticalSection, dwSpinCount)
 #endif
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wreserved-id-macro"
-#endif
+	WINPR_PRAGMA_DIAG_PUSH
+	WINPR_PRAGMA_DIAG_IGNORED_RESERVED_ID_MACRO
 
 #ifndef _RTL_RUN_ONCE_DEF
 #define _RTL_RUN_ONCE_DEF
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+	WINPR_PRAGMA_DIAG_POP
 
 #define RTL_RUN_ONCE_INIT \
 	{                     \

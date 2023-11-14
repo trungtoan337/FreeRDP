@@ -38,7 +38,7 @@
 
 #define NTLM_CheckAndLogRequiredCapacity(tag, s, nmemb, what)                                    \
 	Stream_CheckAndLogRequiredCapacityEx(tag, WLOG_WARN, s, nmemb, 1, "%s(%s:%" PRIuz ") " what, \
-	                                     __FUNCTION__, __FILE__, (size_t)__LINE__)
+	                                     __func__, __FILE__, (size_t)__LINE__)
 
 static char NTLM_CLIENT_SIGN_MAGIC[] = "session key to client-to-server signing key magic constant";
 static char NTLM_SERVER_SIGN_MAGIC[] = "session key to server-to-client signing key magic constant";
@@ -57,16 +57,27 @@ static const BYTE NTLM_NULL_BUFFER[16] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0
 
 BOOL ntlm_get_version_info(NTLM_VERSION_INFO* versionInfo)
 {
-	OSVERSIONINFOA osVersionInfo = { 0 };
-
 	WINPR_ASSERT(versionInfo);
 
+#if defined(WITH_WINPR_DEPRECATED)
+	OSVERSIONINFOA osVersionInfo = { 0 };
 	osVersionInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA);
 	if (!GetVersionExA(&osVersionInfo))
 		return FALSE;
 	versionInfo->ProductMajorVersion = (UINT8)osVersionInfo.dwMajorVersion;
 	versionInfo->ProductMinorVersion = (UINT8)osVersionInfo.dwMinorVersion;
 	versionInfo->ProductBuild = (UINT16)osVersionInfo.dwBuildNumber;
+#else
+	/* Always return fixed version number.
+	 *
+	 * ProductVersion is fixed since windows 10 to Major 10, Minor 0
+	 * ProductBuild taken from https://en.wikipedia.org/wiki/Windows_11_version_history
+	 * with most recent (pre) release build number
+	 */
+	versionInfo->ProductMajorVersion = 10;
+	versionInfo->ProductMinorVersion = 0;
+	versionInfo->ProductBuild = 22631;
+#endif
 	ZeroMemory(versionInfo->Reserved, sizeof(versionInfo->Reserved));
 	versionInfo->NTLMRevisionCurrent = NTLMSSP_REVISION_W2K3;
 	return TRUE;
@@ -111,7 +122,7 @@ BOOL ntlm_write_version_info(wStream* s, const NTLM_VERSION_INFO* versionInfo)
 
 	if (!Stream_CheckAndLogRequiredCapacityEx(
 	        TAG, WLOG_WARN, s, 5ull + sizeof(versionInfo->Reserved), 1ull,
-	        "%s(%s:%" PRIuz ") NTLM_VERSION_INFO", __FUNCTION__, __FILE__, (size_t)__LINE__))
+	        "%s(%s:%" PRIuz ") NTLM_VERSION_INFO", __func__, __FILE__, (size_t)__LINE__))
 		return FALSE;
 
 	Stream_Write_UINT8(s, versionInfo->ProductMajorVersion); /* ProductMajorVersion (1 byte) */

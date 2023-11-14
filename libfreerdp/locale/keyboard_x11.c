@@ -19,6 +19,8 @@
  */
 
 #include <string.h>
+
+#include <X11/X.h>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 
@@ -56,8 +58,14 @@ static BOOL parse_xkb_rule_names(char* xkb_rule, unsigned long num_bytes, char**
 			case 1: // model
 				break;
 			case 2: // layout
+			{
+				/* If multiple languages are present we just take the first one */
+				char* delimiter = strchr(ptr, ',');
+				if (delimiter)
+					*delimiter = '\0';
 				*layout = ptr;
 				break;
+			}
 			case 3: // variant
 				*variant = ptr;
 				break;
@@ -109,20 +117,24 @@ static DWORD kbd_layout_id_from_x_property(Display* display, Window root, char* 
 
 int freerdp_detect_keyboard_layout_from_xkb(DWORD* keyboardLayoutId)
 {
-	Window root;
 	Display* display = XOpenDisplay(NULL);
 
 	if (!display)
 		return 0;
 
-	root = DefaultRootWindow(display);
+	Window root = DefaultRootWindow(display);
+	if (!root)
+		return 0;
 
 	/* We start by looking for _XKB_RULES_NAMES_BACKUP which appears to be used by libxklavier */
-	*keyboardLayoutId = kbd_layout_id_from_x_property(display, root, "_XKB_RULES_NAMES_BACKUP");
+	DWORD id = kbd_layout_id_from_x_property(display, root, "_XKB_RULES_NAMES_BACKUP");
 
-	if (0 == *keyboardLayoutId)
-		*keyboardLayoutId = kbd_layout_id_from_x_property(display, root, "_XKB_RULES_NAMES");
+	if (0 == id)
+		id = kbd_layout_id_from_x_property(display, root, "_XKB_RULES_NAMES");
+
+	if (0 != id)
+		*keyboardLayoutId = id;
 
 	XCloseDisplay(display);
-	return (int)*keyboardLayoutId;
+	return (int)id;
 }

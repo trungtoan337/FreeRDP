@@ -103,7 +103,7 @@ auth_status utils_authenticate_gateway(freerdp* instance, rdp_auth_reason reason
 		    instance->GatewayAuthenticate(instance, &settings->GatewayUsername,
 		                                  &settings->GatewayPassword, &settings->GatewayDomain);
 		if (!proceed)
-			return AUTH_NO_CREDENTIALS;
+			return AUTH_CANCELLED;
 	}
 
 	if (utils_str_is_empty(settings->GatewayUsername) ||
@@ -147,6 +147,9 @@ auth_status utils_authenticate(freerdp* instance, rdp_auth_reason reason, BOOL o
 
 	if (freerdp_shall_disconnect_context(instance->context))
 		return AUTH_FAILED;
+
+	if (settings->ConnectChildSession)
+		return AUTH_NO_CREDENTIALS;
 
 	/* Ask for auth data if no or an empty username was specified or no password was given */
 	if (utils_str_is_empty(freerdp_settings_get_string(settings, FreeRDP_Username)) ||

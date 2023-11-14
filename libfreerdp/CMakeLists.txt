@@ -68,11 +68,18 @@ macro (freerdp_include_directory_add)
         endif()
 endmacro()
 
+macro (freerdp_library_add_public)
+	foreach (_lib ${ARGN})
+		list (APPEND LIBFREERDP_PUB_LIBS "${_lib}")
+	endforeach()
+	set (LIBFREERDP_PUB_LIBS ${LIBFREERDP_PUB_LIBS} PARENT_SCOPE)
+endmacro()
+
 macro (freerdp_library_add)
-        foreach (_lib ${ARGN})
-                        list (APPEND LIBFREERDP_LIBS "${_lib}")
-        endforeach()
-         set (LIBFREERDP_LIBS ${LIBFREERDP_LIBS} PARENT_SCOPE)
+	foreach (_lib ${ARGN})
+		list (APPEND LIBFREERDP_LIBS "${_lib}")
+	endforeach()
+	set (LIBFREERDP_LIBS ${LIBFREERDP_LIBS} PARENT_SCOPE)
 endmacro()
 
 macro (freerdp_definition_add)
@@ -219,8 +226,14 @@ if(FAAC_FOUND)
     include_directories(${FAAC_INCLUDE_DIRS})
 endif()
 
-if(WITH_CJSON)
-    freerdp_library_add(${CJSON_LIBRARIES})
+if (WITH_AAD)
+	if (NOT cJSON_FOUND)
+		find_package(PkgConfig REQUIRED)
+		pkg_check_modules(CJSON REQUIRED libcjson)
+	endif()
+	include_directories(${CJSON_INCLUDE_DIRS})
+
+	freerdp_library_add(${CJSON_LIBRARIES})
     include_directories(${CJSON_INCLUDE_DIRS})
 endif()
 
@@ -380,8 +393,11 @@ endif()
 
 # /primitives
 
+list(APPEND LIBFREERDP_PUB_LIBS winpr)
+
 list(REMOVE_DUPLICATES LIBFREERDP_DEFINITIONS)
 list(REMOVE_DUPLICATES LIBFREERDP_LIBS)
+list(REMOVE_DUPLICATES LIBFREERDP_PUB_LIBS)
 list(REMOVE_DUPLICATES LIBFREERDP_INCLUDES)
 include_directories(${LIBFREERDP_INCLUDES})
 
@@ -411,8 +427,9 @@ if (WITH_LIBRARY_VERSIONING)
     set_target_properties(${MODULE_NAME} PROPERTIES VERSION ${FREERDP_VERSION} SOVERSION ${FREERDP_API_VERSION})
 endif()
 
-target_link_libraries(${MODULE_NAME} PRIVATE ${LIBFREERDP_LIBS} winpr)
-
+target_include_directories(${MODULE_NAME} INTERFACE $<INSTALL_INTERFACE:include>)
+target_link_libraries(${MODULE_NAME} PRIVATE ${LIBFREERDP_LIBS})
+target_link_libraries(${MODULE_NAME} PUBLIC ${LIBFREERDP_PUB_LIBS})
 install(TARGETS ${MODULE_NAME} COMPONENT libraries EXPORT FreeRDPTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -425,6 +442,7 @@ endif()
 
 set_property(TARGET ${MODULE_NAME} PROPERTY FOLDER "FreeRDP/libfreerdp")
 
+include(pkg-config-install-prefix)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/freerdp.pc.in ${CMAKE_CURRENT_BINARY_DIR}/freerdp${FREERDP_VERSION_MAJOR}.pc @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/freerdp${FREERDP_VERSION_MAJOR}.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 

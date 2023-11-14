@@ -100,6 +100,7 @@ extern "C"
 #define CS_MONITOR 0xC005
 #define CS_MCS_MSGCHANNEL 0xC006
 #define CS_MONITOR_EX 0xC008
+#define CS_UNUSED1 0xC00C
 #define CS_MULTITRANSPORT 0xC00A
 
 /* Server to Client (SC) data blocks */
@@ -128,7 +129,8 @@ extern "C"
 		RDP_VERSION_10_8 = 0x0008000D,
 		RDP_VERSION_10_9 = 0x0008000E,
 		RDP_VERSION_10_10 = 0x0008000F,
-		RDP_VERSION_10_11 = 0x00080010
+		RDP_VERSION_10_11 = 0x00080010,
+		RDP_VERSION_10_12 = 0x00080011
 	} RDP_VERSION;
 
 /* Color depth */
@@ -485,12 +487,13 @@ extern "C"
 /* ThreadingFlags */
 #define THREADING_FLAGS_DISABLE_THREADS 0x00000001
 
-/* Settings */
+	/* Settings */
 
-/**
- * FreeRDP Settings Ids
- * This is generated with a script parsing the rdpSettings data structure
- */
+	/**
+	 * FreeRDP Settings Ids
+	 * This is generated with a script parsing the rdpSettings data structure
+	 */
+
 #define FreeRDP_instance (0)
 #define FreeRDP_ServerMode (16)
 #define FreeRDP_ShareId (17)
@@ -647,6 +650,7 @@ extern "C"
 #define FreeRDP_AuthenticationPackageList (1110)
 #define FreeRDP_RdstlsSecurity (1111)
 #define FreeRDP_AadSecurity (1112)
+#define FreeRDP_WinSCardModule (1113)
 #define FreeRDP_MstscCookieMode (1152)
 #define FreeRDP_CookieMaxLength (1153)
 #define FreeRDP_PreconnectionId (1154)
@@ -734,6 +738,8 @@ extern "C"
 #define FreeRDP_UnmapButtons (1605)
 #define FreeRDP_OldLicenseBehaviour (1606)
 #define FreeRDP_MouseUseRelativeMove (1607)
+#define FreeRDP_UseCommonStdioCallbacks (1608)
+#define FreeRDP_ConnectChildSession (1609)
 #define FreeRDP_ComputerName (1664)
 #define FreeRDP_ConnectionFile (1728)
 #define FreeRDP_AssistanceFile (1729)
@@ -766,6 +772,16 @@ extern "C"
 #define FreeRDP_GatewayAcceptedCertLength (1999)
 #define FreeRDP_GatewayHttpUseWebsockets (2000)
 #define FreeRDP_GatewayHttpExtAuthSspiNtlm (2001)
+#define FreeRDP_GatewayHttpExtAuthBearer (2002)
+#define FreeRDP_GatewayUrl (2003)
+#define FreeRDP_GatewayArmTransport (2004)
+#define FreeRDP_GatewayAvdWvdEndpointPool (2005)
+#define FreeRDP_GatewayAvdGeo (2006)
+#define FreeRDP_GatewayAvdArmpath (2007)
+#define FreeRDP_GatewayAvdAadtenantid (2008)
+#define FreeRDP_GatewayAvdDiagnosticserviceurl (2009)
+#define FreeRDP_GatewayAvdHubdiscoverygeourl (2010)
+#define FreeRDP_GatewayAvdActivityhint (2011)
 #define FreeRDP_ProxyType (2015)
 #define FreeRDP_ProxyHostname (2016)
 #define FreeRDP_ProxyPort (2017)
@@ -842,6 +858,9 @@ extern "C"
 #define FreeRDP_HasHorizontalWheel (2634)
 #define FreeRDP_HasExtendedMouseEvent (2635)
 #define FreeRDP_SuspendInput (2636)
+#define FreeRDP_KeyboardPipeName (2637)
+#define FreeRDP_HasRelativeMouseEvent (2638)
+#define FreeRDP_HasQoeEvent (2639)
 #define FreeRDP_BrushSupportLevel (2688)
 #define FreeRDP_GlyphSupportLevel (2752)
 #define FreeRDP_GlyphCache (2753)
@@ -898,12 +917,14 @@ extern "C"
 #define FreeRDP_RedirectHomeDrive (4289)
 #define FreeRDP_DrivesToRedirect (4290)
 #define FreeRDP_RedirectSmartCards (4416)
+#define FreeRDP_RedirectWebAuthN (4417)
 #define FreeRDP_RedirectPrinters (4544)
 #define FreeRDP_RedirectSerialPorts (4672)
 #define FreeRDP_RedirectParallelPorts (4673)
 #define FreeRDP_PreferIPv6OverIPv4 (4674)
 #define FreeRDP_RedirectClipboard (4800)
 #define FreeRDP_ClipboardFeatureMask (4801)
+#define FreeRDP_ClipboardUseSelection (4802)
 #define FreeRDP_StaticChannelCount (4928)
 #define FreeRDP_StaticChannelArraySize (4929)
 #define FreeRDP_StaticChannelArray (4930)
@@ -925,6 +946,7 @@ extern "C"
 #define FreeRDP_ActionScript (5195)
 #define FreeRDP_Floatbar (5196)
 #define FreeRDP_TcpConnectTimeout (5197)
+#define FreeRDP_FakeMouseMotionInterval (5198)
 
 	/**
 	 * FreeRDP Settings Data Structure
@@ -1162,7 +1184,8 @@ extern "C"
 		ALIGN64 char* AuthenticationPackageList;   /* 1110 */
 		ALIGN64 BOOL RdstlsSecurity;               /* 1111 */
 		ALIGN64 BOOL AadSecurity;                  /* 1112 */
-		UINT64 padding1152[1152 - 1113];           /* 1113 */
+		ALIGN64 char* WinSCardModule;              /* 1113 */
+		UINT64 padding1152[1152 - 1114];           /* 1114 */
 
 		/* Connection Cookie */
 		ALIGN64 BOOL MstscCookieMode;      /* 1152 */
@@ -1281,14 +1304,16 @@ extern "C"
 		UINT64 padding1601[1601 - 1560];      /* 1560 */
 
 		/* Miscellaneous */
-		ALIGN64 BOOL SoftwareGdi;          /* 1601 */
-		ALIGN64 BOOL LocalConnection;      /* 1602 */
-		ALIGN64 BOOL AuthenticationOnly;   /* 1603 */
-		ALIGN64 BOOL CredentialsFromStdin; /* 1604 */
-		ALIGN64 BOOL UnmapButtons;         /* 1605 */
-		ALIGN64 BOOL OldLicenseBehaviour;  /* 1606 */
-		ALIGN64 BOOL MouseUseRelativeMove; /* 1607 */
-		UINT64 padding1664[1664 - 1608];   /* 1608 */
+		ALIGN64 BOOL SoftwareGdi;             /* 1601 */
+		ALIGN64 BOOL LocalConnection;         /* 1602 */
+		ALIGN64 BOOL AuthenticationOnly;      /* 1603 */
+		ALIGN64 BOOL CredentialsFromStdin;    /* 1604 */
+		ALIGN64 BOOL UnmapButtons;            /* 1605 */
+		ALIGN64 BOOL OldLicenseBehaviour;     /* 1606 */
+		ALIGN64 BOOL MouseUseRelativeMove;    /* 1607 */
+		ALIGN64 BOOL UseCommonStdioCallbacks; /* 1608 */
+		ALIGN64 BOOL ConnectChildSession;     /* 1609 */
+		UINT64 padding1664[1664 - 1610];      /* 1610 */
 
 		/* Names */
 		ALIGN64 char* ComputerName;      /* 1664 */
@@ -1322,25 +1347,35 @@ extern "C"
 		 */
 
 		/* Gateway */
-		ALIGN64 UINT32 GatewayUsageMethod;        /* 1984 */
-		ALIGN64 UINT32 GatewayPort;               /* 1985 */
-		ALIGN64 char* GatewayHostname;            /* 1986 */
-		ALIGN64 char* GatewayUsername;            /* 1987 */
-		ALIGN64 char* GatewayPassword;            /* 1988 */
-		ALIGN64 char* GatewayDomain;              /* 1989 */
-		ALIGN64 UINT32 GatewayCredentialsSource;  /* 1990 */
-		ALIGN64 BOOL GatewayUseSameCredentials;   /* 1991 */
-		ALIGN64 BOOL GatewayEnabled;              /* 1992 */
-		ALIGN64 BOOL GatewayBypassLocal;          /* 1993 */
-		ALIGN64 BOOL GatewayRpcTransport;         /* 1994 */
-		ALIGN64 BOOL GatewayHttpTransport;        /* 1995 */
-		ALIGN64 BOOL GatewayUdpTransport;         /* 1996 */
-		ALIGN64 char* GatewayAccessToken;         /* 1997 */
-		ALIGN64 char* GatewayAcceptedCert;        /* 1998 */
-		ALIGN64 UINT32 GatewayAcceptedCertLength; /* 1999 */
-		ALIGN64 BOOL GatewayHttpUseWebsockets;    /* 2000 */
-		ALIGN64 BOOL GatewayHttpExtAuthSspiNtlm;  /* 2001 */
-		UINT64 padding2015[2015 - 2002];          /* 2002 */
+		ALIGN64 UINT32 GatewayUsageMethod;            /* 1984 */
+		ALIGN64 UINT32 GatewayPort;                   /* 1985 */
+		ALIGN64 char* GatewayHostname;                /* 1986 */
+		ALIGN64 char* GatewayUsername;                /* 1987 */
+		ALIGN64 char* GatewayPassword;                /* 1988 */
+		ALIGN64 char* GatewayDomain;                  /* 1989 */
+		ALIGN64 UINT32 GatewayCredentialsSource;      /* 1990 */
+		ALIGN64 BOOL GatewayUseSameCredentials;       /* 1991 */
+		ALIGN64 BOOL GatewayEnabled;                  /* 1992 */
+		ALIGN64 BOOL GatewayBypassLocal;              /* 1993 */
+		ALIGN64 BOOL GatewayRpcTransport;             /* 1994 */
+		ALIGN64 BOOL GatewayHttpTransport;            /* 1995 */
+		ALIGN64 BOOL GatewayUdpTransport;             /* 1996 */
+		ALIGN64 char* GatewayAccessToken;             /* 1997 */
+		ALIGN64 char* GatewayAcceptedCert;            /* 1998 */
+		ALIGN64 UINT32 GatewayAcceptedCertLength;     /* 1999 */
+		ALIGN64 BOOL GatewayHttpUseWebsockets;        /* 2000 */
+		ALIGN64 BOOL GatewayHttpExtAuthSspiNtlm;      /* 2001 */
+		ALIGN64 char* GatewayHttpExtAuthBearer;       /* 2002 */
+		ALIGN64 char* GatewayUrl;                     /* 2003 */
+		ALIGN64 BOOL GatewayArmTransport;             /* 2004 */
+		ALIGN64 char* GatewayAvdWvdEndpointPool;      /* 2005 */
+		ALIGN64 char* GatewayAvdGeo;                  /* 2006 */
+		ALIGN64 char* GatewayAvdArmpath;              /* 2007 */
+		ALIGN64 char* GatewayAvdAadtenantid;          /* 2008 */
+		ALIGN64 char* GatewayAvdDiagnosticserviceurl; /* 2009 */
+		ALIGN64 char* GatewayAvdHubdiscoverygeourl;   /* 2010 */
+		ALIGN64 char* GatewayAvdActivityhint;         /* 2011 */
+		UINT64 padding2015[2015 - 2012];              /* 2012 */
 
 		/* Proxy */
 		ALIGN64 UINT32 ProxyType;        /* 2015 */
@@ -1457,7 +1492,10 @@ extern "C"
 		 * input
 		 */
 		ALIGN64 BOOL SuspendInput;       /* 2636 */
-		UINT64 padding2688[2688 - 2637]; /* 2637 */
+		ALIGN64 char* KeyboardPipeName;  /* 2637 */
+		ALIGN64 BOOL HasRelativeMouseEvent; /* 2638 */
+		ALIGN64 BOOL HasQoeEvent;           /* 2639 */
+		UINT64 padding2688[2688 - 2640];    /* 2640 */
 
 		/* Brush Capabilities */
 		ALIGN64 UINT32 BrushSupportLevel; /* 2688 */
@@ -1600,7 +1638,9 @@ extern "C"
 
 		/* Smartcard Redirection */
 		ALIGN64 BOOL RedirectSmartCards; /* 4416 */
-		UINT64 padding4544[4544 - 4417]; /* 4417 */
+		/* WebAuthN Redirection */
+		ALIGN64 BOOL RedirectWebAuthN;   /* 4417 */
+		UINT64 padding4544[4544 - 4418]; /* 4418 */
 
 		/* Printer Redirection */
 		ALIGN64 BOOL RedirectPrinters;   /* 4544 */
@@ -1616,9 +1656,10 @@ extern "C"
 		 * Other Redirection
 		 */
 
-		ALIGN64 BOOL RedirectClipboard;  /* 4800 */
+		ALIGN64 BOOL RedirectClipboard;      /* 4800 */
 		ALIGN64 UINT32 ClipboardFeatureMask; /* 4801 */
-		UINT64 padding4928[4928 - 4802];     /* 4802 */
+		ALIGN64 char* ClipboardUseSelection; /* 4802 */
+		UINT64 padding4928[4928 - 4803];     /* 4803 */
 
 		/**
 		 * Static Virtual Channels
@@ -1653,7 +1694,8 @@ extern "C"
 		ALIGN64 char* ActionScript;           /* 5195 */
 		ALIGN64 UINT32 Floatbar;              /* 5196 */
 		ALIGN64 UINT32 TcpConnectTimeout;     /* 5197 */
-		UINT64 padding5312[5312 - 5198];      /* 5198 */
+		ALIGN64 UINT32 FakeMouseMotionInterval; /* 5198 */
+		UINT64 padding5312[5312 - 5199];        /* 5199 */
 
 		/**
 		 * WARNING: End of ABI stable zone!
@@ -1661,18 +1703,6 @@ extern "C"
 		 * The zone below this point is ABI unstable, and
 		 * is therefore potentially subject to ABI breakage.
 		 */
-
-		/*
-		 * Extensions
-		 */
-
-		/* Extensions */
-		ALIGN64 INT32 num_extensions;              /*  */
-		ALIGN64 struct rdp_ext_set extensions[16]; /*  */
-
-		ALIGN64 BYTE* SettingsModified; /* byte array marking fields that have been modified from
-		                                   their default value - currently UNUSED! */
-		ALIGN64 char* XSelectionAtom;
 	};
 	typedef struct rdp_settings rdpSettings;
 
@@ -1693,6 +1723,7 @@ extern "C"
  * rdpSettings creation flags
  */
 #define FREERDP_SETTINGS_SERVER_MODE 0x00000001
+#define FREERDP_SETTINGS_REMOTE_MODE 0x00000002
 
 	/** \brief creates a new setting struct
 	 *
@@ -2035,6 +2066,17 @@ extern "C"
 	 */
 	FREERDP_API BOOL freerdp_settings_set_string(rdpSettings* settings, size_t id,
 	                                             const char* param);
+
+	/** \brief Takes a string settings value. The \b param is assumed to be malloced (same runtime
+	 * as freerdp library!).
+	 *
+	 *  \param settings A pointer to the settings to query, must not be NULL.
+	 *  \param id The key to query
+	 *  \param param The value to set. Old values are freed up, the value is set as the new one.
+	 *
+	 *  \return \b TRUE for success, \b FALSE for failure
+	 */
+	FREERDP_API BOOL freerdp_settings_take_string(rdpSettings* settings, size_t id, char* param);
 
 	/** \brief Sets a string settings value. The \b param is converted to UTF-8 and the copy stored.
 	 *

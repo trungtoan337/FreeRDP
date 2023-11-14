@@ -765,6 +765,17 @@ static BOOL shadow_are_caps_filtered(const rdpSettings* settings, UINT32 caps)
 	return TRUE;
 }
 
+static UINT shadow_client_send_caps_confirm(RdpgfxServerContext* context, rdpShadowClient* client,
+                                            const RDPGFX_CAPS_CONFIRM_PDU* pdu)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(client);
+	WINPR_ASSERT(pdu);
+
+	WINPR_ASSERT(context->CapsConfirm);
+	return context->CapsConfirm(context, pdu);
+}
+
 static BOOL shadow_client_caps_test_version(RdpgfxServerContext* context, rdpShadowClient* client,
                                             BOOL h264, const RDPGFX_CAPSET* capsSets,
                                             UINT32 capsSetCount, UINT32 capsVersion, UINT* rc)
@@ -807,7 +818,7 @@ static BOOL shadow_client_caps_test_version(RdpgfxServerContext* context, rdpSha
 
 			flags = pdu.capsSet->flags;
 
-			clientSettings->GfxSmallCache = (flags & RDPGFX_CAPS_FLAG_SMALL_CACHE);
+			clientSettings->GfxSmallCache = (flags & RDPGFX_CAPS_FLAG_SMALL_CACHE) ? TRUE : FALSE;
 
 			avc444v2 = avc444 = !(flags & RDPGFX_CAPS_FLAG_AVC_DISABLED);
 			if (!freerdp_settings_get_bool(srvSettings, FreeRDP_GfxAVC444v2) || !h264)
@@ -834,8 +845,7 @@ static BOOL shadow_client_caps_test_version(RdpgfxServerContext* context, rdpSha
 			if (!avc444v2 && !avc444 && !avc420)
 				pdu.capsSet->flags |= RDPGFX_CAPS_FLAG_AVC_DISABLED;
 
-			WINPR_ASSERT(context->CapsConfirm);
-			*rc = context->CapsConfirm(context, &pdu);
+			*rc = shadow_client_send_caps_confirm(context, client, &pdu);
 			return TRUE;
 		}
 	}
@@ -941,9 +951,9 @@ static UINT shadow_client_rdpgfx_caps_advertise(RdpgfxServerContext* context,
 				freerdp_settings_set_bool(clientSettings, FreeRDP_GfxAVC444, FALSE);
 
 				freerdp_settings_set_bool(clientSettings, FreeRDP_GfxThinClient,
-				                          (flags & RDPGFX_CAPS_FLAG_THINCLIENT));
+				                          (flags & RDPGFX_CAPS_FLAG_THINCLIENT) ? TRUE : FALSE);
 				freerdp_settings_set_bool(clientSettings, FreeRDP_GfxSmallCache,
-				                          (flags & RDPGFX_CAPS_FLAG_SMALL_CACHE));
+				                          (flags & RDPGFX_CAPS_FLAG_SMALL_CACHE) ? TRUE : FALSE);
 
 #ifndef WITH_GFX_H264
 				freerdp_settings_set_bool(clientSettings, FreeRDP_GfxH264, FALSE);
@@ -952,13 +962,13 @@ static UINT shadow_client_rdpgfx_caps_advertise(RdpgfxServerContext* context,
 
 				if (h264)
 					freerdp_settings_set_bool(clientSettings, FreeRDP_GfxH264,
-					                          (flags & RDPGFX_CAPS_FLAG_AVC420_ENABLED));
+					                          (flags & RDPGFX_CAPS_FLAG_AVC420_ENABLED) ? TRUE
+					                                                                    : FALSE);
 				else
 					freerdp_settings_set_bool(clientSettings, FreeRDP_GfxH264, FALSE);
 #endif
 
-				WINPR_ASSERT(context->CapsConfirm);
-				return context->CapsConfirm(context, &pdu);
+				return shadow_client_send_caps_confirm(context, client, &pdu);
 			}
 		}
 	}
@@ -981,12 +991,11 @@ static UINT shadow_client_rdpgfx_caps_advertise(RdpgfxServerContext* context,
 				freerdp_settings_set_bool(clientSettings, FreeRDP_GfxH264, FALSE);
 
 				freerdp_settings_set_bool(clientSettings, FreeRDP_GfxThinClient,
-				                          (flags & RDPGFX_CAPS_FLAG_THINCLIENT));
+				                          (flags & RDPGFX_CAPS_FLAG_THINCLIENT) ? TRUE : FALSE);
 				freerdp_settings_set_bool(clientSettings, FreeRDP_GfxSmallCache,
-				                          (flags & RDPGFX_CAPS_FLAG_SMALL_CACHE));
+				                          (flags & RDPGFX_CAPS_FLAG_SMALL_CACHE) ? TRUE : FALSE);
 
-				WINPR_ASSERT(context->CapsConfirm);
-				return context->CapsConfirm(context, &pdu);
+				return shadow_client_send_caps_confirm(context, client, &pdu);
 			}
 		}
 	}
@@ -2050,12 +2059,10 @@ static DWORD WINAPI shadow_client_thread(LPVOID arg)
 	rdpShadowClient* client = (rdpShadowClient*)arg;
 	BOOL rc = FALSE;
 	DWORD status = 0;
-	DWORD nCount = 0;
 	wMessage message = { 0 };
 	wMessage pointerPositionMsg = { 0 };
 	wMessage pointerAlphaMsg = { 0 };
 	wMessage audioVolumeMsg = { 0 };
-	HANDLE events[32] = { 0 };
 	HANDLE ChannelEvent = 0;
 	void* UpdateSubscriber = NULL;
 	HANDLE UpdateEvent = 0;
@@ -2122,10 +2129,12 @@ static DWORD WINAPI shadow_client_thread(LPVOID arg)
 	WINPR_ASSERT(rc);
 	rc = freerdp_settings_set_bool(settings, FreeRDP_HasExtendedMouseEvent, TRUE);
 	WINPR_ASSERT(rc);
-
+	rc = freerdp_settings_set_bool(settings, FreeRDP_SupportMonitorLayoutPdu, TRUE);
+	WINPR_ASSERT(rc);
 	while (1)
 	{
-		nCount = 0;
+		HANDLE events[MAXIMUM_WAIT_OBJECTS] = { 0 };
+		DWORD nCount = 0;
 		events[nCount++] = UpdateEvent;
 		{
 			DWORD tmp = peer->GetEventHandles(peer, &events[nCount], 64 - nCount);
@@ -2140,6 +2149,12 @@ static DWORD WINAPI shadow_client_thread(LPVOID arg)
 		}
 		events[nCount++] = ChannelEvent;
 		events[nCount++] = MessageQueue_Event(MsgQueue);
+
+		HANDLE gfxevent = rdpgfx_server_get_event_handle(client->rdpgfx);
+
+		if (gfxevent)
+			events[nCount++] = gfxevent;
+
 		status = WaitForMultipleObjects(nCount, events, FALSE, INFINITE);
 
 		if (status == WAIT_FAILED)
@@ -2262,6 +2277,14 @@ static DWORD WINAPI shadow_client_thread(LPVOID arg)
 			{
 				WLog_ERR(TAG, "WTSVirtualChannelManagerCheckFileDescriptor failure");
 				goto fail;
+			}
+		}
+
+		if (gfxevent)
+		{
+			if (WaitForSingleObject(gfxevent, 0) == WAIT_OBJECT_0)
+			{
+				rdpgfx_server_handle_messages(client->rdpgfx);
 			}
 		}
 

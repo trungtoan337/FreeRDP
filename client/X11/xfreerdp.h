@@ -135,6 +135,7 @@ typedef struct touch_contact
 	double last_y;
 
 } touchContact;
+
 #endif
 
 struct xf_context
@@ -293,6 +294,7 @@ struct xf_context
 #endif
 	BOOL xi_rawevent;
 	BOOL xi_event;
+	HANDLE pipethread;
 };
 
 BOOL xf_create_window(xfContext* xfc);
@@ -368,8 +370,8 @@ enum XF_EXIT_CODE
 	XF_EXIT_UNKNOWN = 255,
 };
 
-#define xf_lock_x11(xfc) xf_lock_x11_(xfc, __FUNCTION__)
-#define xf_unlock_x11(xfc) xf_unlock_x11_(xfc, __FUNCTION__)
+#define xf_lock_x11(xfc) xf_lock_x11_(xfc, __func__)
+#define xf_unlock_x11(xfc) xf_unlock_x11_(xfc, __func__)
 
 void xf_lock_x11_(xfContext* xfc, const char* fkt);
 void xf_unlock_x11_(xfContext* xfc, const char* fkt);
@@ -377,7 +379,7 @@ void xf_unlock_x11_(xfContext* xfc, const char* fkt);
 BOOL xf_picture_transform_required(xfContext* xfc);
 
 #define xf_draw_screen(_xfc, _x, _y, _w, _h) \
-	xf_draw_screen_((_xfc), (_x), (_y), (_w), (_h), __FUNCTION__, __FILE__, __LINE__)
+	xf_draw_screen_((_xfc), (_x), (_y), (_w), (_h), __func__, __FILE__, __LINE__)
 void xf_draw_screen_(xfContext* xfc, int x, int y, int w, int h, const char* fkt, const char* file,
                      int line);
 

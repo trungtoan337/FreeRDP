@@ -239,7 +239,7 @@ static size_t udevman_register_udevice(IUDEVMAN* idevman, BYTE bus_number, BYTE 
 	}
 	else
 	{
-		WLog_Print(urbdrc->log, WLOG_ERROR, "udevman_register_udevice: Invalid flag=%08 " PRIx32,
+		WLog_Print(urbdrc->log, WLOG_ERROR, "udevman_register_udevice: Invalid flag=%08" PRIx32,
 		           flag);
 		return 0;
 	}
@@ -895,7 +895,8 @@ static DWORD WINAPI poll_thread(LPVOID lpThreadParameter)
 	return 0;
 }
 
-UINT libusb_freerdp_urbdrc_client_subsystem_entry(PFREERDP_URBDRC_SERVICE_ENTRY_POINTS pEntryPoints)
+FREERDP_ENTRY_POINT(UINT libusb_freerdp_urbdrc_client_subsystem_entry(
+    PFREERDP_URBDRC_SERVICE_ENTRY_POINTS pEntryPoints))
 {
 	wObject* obj;
 	UINT rc;

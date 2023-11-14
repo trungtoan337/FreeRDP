@@ -108,6 +108,49 @@ static const char* DATA_PDU_TYPE_STRINGS[80] = {
 	"?" /* 0x41 - 0x46 */
 };
 
+#define rdp_check_monitor_layout_pdu_state(rdp, expected) \
+	rdp_check_monitor_layout_pdu_state_(rdp, expected, __FILE__, __func__, __LINE__)
+
+static BOOL rdp_check_monitor_layout_pdu_state_(const rdpRdp* rdp, BOOL expected, const char* file,
+                                                const char* fkt, size_t line)
+{
+	WINPR_ASSERT(rdp);
+	if (expected != rdp->monitor_layout_pdu)
+	{
+		const DWORD log_level = WLOG_ERROR;
+		if (WLog_IsLevelActive(rdp->log, log_level))
+		{
+			WLog_PrintMessage(rdp->log, WLOG_MESSAGE_TEXT, log_level, line, file, fkt,
+			                  "Expected rdp->monitor_layout_pdu == %s",
+			                  expected ? "TRUE" : "FALSE");
+		}
+		return FALSE;
+	}
+	return TRUE;
+}
+
+#define rdp_set_monitor_layout_pdu_state(rdp, expected) \
+	rdp_set_monitor_layout_pdu_state_(rdp, expected, __FILE__, __func__, __LINE__)
+static BOOL rdp_set_monitor_layout_pdu_state_(rdpRdp* rdp, BOOL value, const char* file,
+                                              const char* fkt, size_t line)
+{
+
+	WINPR_ASSERT(rdp);
+	if (value && (value == rdp->monitor_layout_pdu))
+	{
+		const DWORD log_level = WLOG_WARN;
+		if (WLog_IsLevelActive(rdp->log, log_level))
+		{
+			WLog_PrintMessage(rdp->log, WLOG_MESSAGE_TEXT, log_level, line, file, fkt,
+			                  "rdp->monitor_layout_pdu == %s, expected FALSE",
+			                  value ? "TRUE" : "FALSE");
+		}
+		return FALSE;
+	}
+	rdp->monitor_layout_pdu = value;
+	return TRUE;
+}
+
 const char* data_pdu_type_to_string(UINT8 type)
 {
 	if (type >= ARRAYSIZE(DATA_PDU_TYPE_STRINGS))
@@ -542,12 +585,12 @@ BOOL rdp_read_header(rdpRdp* rdp, wStream* s, UINT16* length, UINT16* channelId)
 	{
 		int reason = 0;
 		TerminateEventArgs e = { 0 };
-		rdpContext* context;
 
 		if (!mcs_recv_disconnect_provider_ultimatum(rdp->mcs, s, &reason))
 			return FALSE;
 
-		context = rdp->context;
+		rdpContext* context = rdp->context;
+		WINPR_ASSERT(context);
 		context->disconnectUltimatum = reason;
 
 		if (rdp->errorInfo == ERRINFO_SUCCESS)
@@ -648,7 +691,6 @@ BOOL rdp_write_header(rdpRdp* rdp, wStream* s, UINT16 length, UINT16 channelId)
 static BOOL rdp_security_stream_out(rdpRdp* rdp, wStream* s, int length, UINT32 sec_flags,
                                     UINT32* pad)
 {
-	BYTE* data;
 	BOOL status;
 	WINPR_ASSERT(rdp);
 	sec_flags |= rdp->sec_flags;
@@ -667,7 +709,7 @@ static BOOL rdp_security_stream_out(rdpRdp* rdp, wStream* s, int length, UINT32 
 
 			if (rdp->settings->EncryptionMethods == ENCRYPTION_METHOD_FIPS)
 			{
-				data = Stream_Pointer(s) + 12;
+				BYTE* data = Stream_PointerAs(s, BYTE) + 12;
 				length = length - (data - Stream_Buffer(s));
 				Stream_Write_UINT16(s, 0x10); /* length */
 				Stream_Write_UINT8(s, 0x1);   /* TSFIPS_VERSION 1*/
@@ -693,7 +735,7 @@ static BOOL rdp_security_stream_out(rdpRdp* rdp, wStream* s, int length, UINT32 
 			}
 			else
 			{
-				data = Stream_Pointer(s) + 8;
+				const BYTE* data = Stream_PointerAs(s, const BYTE) + 8;
 				length = length - (data - Stream_Buffer(s));
 
 				if (!Stream_CheckAndLogRequiredCapacityWLog(rdp->log, s, 8))
@@ -702,7 +744,8 @@ static BOOL rdp_security_stream_out(rdpRdp* rdp, wStream* s, int length, UINT32 
 					status = security_salted_mac_signature(rdp, data, length, TRUE,
 					                                       Stream_Pointer(s), 8);
 				else
-					status = security_mac_signature(rdp, data, length, Stream_Pointer(s), 8);
+					status =
+					    security_mac_signature(rdp, data, length, Stream_PointerAs(s, BYTE), 8);
 
 				if (!status)
 					goto unlock;
@@ -1017,7 +1060,7 @@ static BOOL rdp_recv_monitor_layout_pdu(rdpRdp* rdp, wStream* s)
 
 	IFCALLRET(rdp->update->RemoteMonitors, ret, rdp->context, monitorCount, monitorDefArray);
 	free(monitorDefArray);
-	return ret;
+	return rdp_set_monitor_layout_pdu_state(rdp, TRUE);
 }
 
 state_run_t rdp_recv_data_pdu(rdpRdp* rdp, wStream* s)
@@ -1054,7 +1097,7 @@ state_run_t rdp_recv_data_pdu(rdpRdp* rdp, wStream* s)
 			return STATE_RUN_FAILED;
 		}
 
-		if (bulk_decompress(rdp->bulk, Stream_Pointer(s), SrcSize, &pDstData, &DstSize,
+		if (bulk_decompress(rdp->bulk, Stream_ConstPointer(s), SrcSize, &pDstData, &DstSize,
 		                    compressedType))
 		{
 			cs = transport_take_from_pool(rdp->transport, DstSize);
@@ -1387,21 +1430,27 @@ BOOL rdp_decrypt(rdpRdp* rdp, wStream* s, UINT16* pLength, UINT16 securityFlags)
 
 	if (rdp->settings->EncryptionMethods == ENCRYPTION_METHOD_FIPS)
 	{
-		UINT16 len;
-		BYTE version, pad;
-		const BYTE* sig;
-		INT64 padLength;
-
 		if (!Stream_CheckAndLogRequiredLengthWLog(rdp->log, s, 12))
 			goto unlock;
 
+		UINT16 len = 0;
 		Stream_Read_UINT16(s, len);    /* 0x10 */
+		if (len != 0x10)
+			WLog_Print(rdp->log, WLOG_WARN, "ENCRYPTION_METHOD_FIPS length %" PRIu16 " != 0x10",
+			           len);
+
+		UINT16 version = 0;
 		Stream_Read_UINT8(s, version); /* 0x1 */
+		if (version != 1)
+			WLog_Print(rdp->log, WLOG_WARN, "ENCRYPTION_METHOD_FIPS version %" PRIu16 " != 1",
+			           version);
+
+		BYTE pad = 0;
 		Stream_Read_UINT8(s, pad);
-		sig = Stream_Pointer(s);
+		const BYTE* sig = Stream_ConstPointer(s);
 		Stream_Seek(s, 8); /* signature */
 		length -= 12;
-		padLength = length - pad;
+		const INT32 padLength = length - pad;
 
 		if ((length <= 0) || (padLength <= 0) || (padLength > UINT16_MAX))
 		{
@@ -1412,7 +1461,7 @@ BOOL rdp_decrypt(rdpRdp* rdp, wStream* s, UINT16* pLength, UINT16 securityFlags)
 		if (!security_fips_decrypt(Stream_Pointer(s), length, rdp))
 			goto unlock;
 
-		if (!security_fips_check_signature(Stream_Pointer(s), length - pad, sig, 8, rdp))
+		if (!security_fips_check_signature(Stream_ConstPointer(s), length - pad, sig, 8, rdp))
 			goto unlock;
 
 		Stream_SetLength(s, Stream_Length(s) - pad);
@@ -1432,14 +1481,15 @@ BOOL rdp_decrypt(rdpRdp* rdp, wStream* s, UINT16* pLength, UINT16 securityFlags)
 			goto unlock;
 		}
 
-		if (!security_decrypt(Stream_Pointer(s), length, rdp))
+		if (!security_decrypt(Stream_PointerAs(s, BYTE), length, rdp))
 			goto unlock;
 
 		if (securityFlags & SEC_SECURE_CHECKSUM)
-			status = security_salted_mac_signature(rdp, Stream_Pointer(s), length, FALSE, cmac,
+			status = security_salted_mac_signature(rdp, Stream_ConstPointer(s), length, FALSE, cmac,
 			                                       sizeof(cmac));
 		else
-			status = security_mac_signature(rdp, Stream_Pointer(s), length, cmac, sizeof(cmac));
+			status =
+			    security_mac_signature(rdp, Stream_ConstPointer(s), length, cmac, sizeof(cmac));
 
 		if (!status)
 			goto unlock;
@@ -1496,7 +1546,7 @@ const char* pdu_type_to_str(UINT16 pduType, char* buffer, size_t length)
 			str = "PDU_TYPE_FLOW_STOP";
 			break;
 		default:
-			str = "PRU_TYPE_UNKNOWN";
+			str = "PDU_TYPE_UNKNOWN";
 			break;
 	}
 
@@ -1736,15 +1786,28 @@ static state_run_t rdp_client_exchange_monitor_layout(rdpRdp* rdp, wStream* s)
 {
 	WINPR_ASSERT(rdp);
 
+	if (!rdp_check_monitor_layout_pdu_state(rdp, FALSE))
+		return FALSE;
+
+	/* We might receive unrelated messages from the server (channel traffic),
+	 * so only proceed if some flag changed
+	 */
 	const UINT32 old = rdp->finalize_sc_pdus;
 	state_run_t status = rdp_recv_pdu(rdp, s);
+	const UINT32 now = rdp->finalize_sc_pdus;
+	const BOOL changed = (old != now) || rdp->monitor_layout_pdu;
 
 	/* This PDU is optional, so if we received a finalize PDU continue there */
-	if (state_run_success(status))
+	if (state_run_success(status) && changed)
 	{
-		const BOOL changed = old != rdp->finalize_sc_pdus;
+		if (!rdp->monitor_layout_pdu)
+		{
+			if (!rdp_finalize_is_flag_set(rdp, FINALIZE_SC_SYNCHRONIZE_PDU))
+				return STATE_RUN_FAILED;
+		}
+
 		status = rdp_client_connect_finalize(rdp);
-		if (changed && state_run_success(status))
+		if (state_run_success(status) && !rdp->monitor_layout_pdu)
 			status = STATE_RUN_TRY_AGAIN;
 	}
 	return status;
@@ -2157,7 +2220,6 @@ rdpRdp* rdp_new(rdpContext* context)
 {
 	rdpRdp* rdp;
 	DWORD flags = 0;
-	DWORD remoteFlags = 0;
 	rdp = (rdpRdp*)calloc(1, sizeof(rdpRdp));
 
 	if (!rdp)
@@ -2166,14 +2228,15 @@ rdpRdp* rdp_new(rdpContext* context)
 	rdp->log = WLog_Get(RDP_TAG);
 	WINPR_ASSERT(rdp->log);
 
+	_snprintf(rdp->log_context, sizeof(rdp->log_context), "%p", context);
+	WLog_SetContext(rdp->log, NULL, rdp->log_context);
+
 	InitializeCriticalSection(&rdp->critical);
 	rdp->context = context;
-	flags = 0;
+	WINPR_ASSERT(rdp->context);
 
 	if (context->ServerMode)
 		flags |= FREERDP_SETTINGS_SERVER_MODE;
-	else
-		remoteFlags |= FREERDP_SETTINGS_SERVER_MODE;
 
 	if (!context->settings)
 	{
@@ -2512,7 +2575,8 @@ BOOL rdp_finalize_reset_flags(rdpRdp* rdp, BOOL clearAll)
 		rdp->finalize_sc_pdus = 0;
 	else
 		rdp->finalize_sc_pdus &= FINALIZE_DEACTIVATE_REACTIVATE;
-	return TRUE;
+
+	return rdp_set_monitor_layout_pdu_state(rdp, FALSE);
 }
 
 BOOL rdp_finalize_set_flag(rdpRdp* rdp, UINT32 flag)
@@ -2612,7 +2676,7 @@ const char* rdp_security_flag_string(UINT32 securityFlags, char* buffer, size_t 
 
 static BOOL rdp_reset_remote_settings(rdpRdp* rdp)
 {
-	UINT32 flags = 0;
+	UINT32 flags = FREERDP_SETTINGS_REMOTE_MODE;
 	WINPR_ASSERT(rdp);
 	freerdp_settings_free(rdp->remoteSettings);
 
@@ -2635,6 +2699,7 @@ BOOL rdp_set_backup_settings(rdpRdp* rdp)
 BOOL rdp_reset_runtime_settings(rdpRdp* rdp)
 {
 	WINPR_ASSERT(rdp);
+	WINPR_ASSERT(rdp->context);
 
 	freerdp_settings_free(rdp->settings);
 	rdp->context->settings = rdp->settings = freerdp_settings_clone(rdp->originalSettings);

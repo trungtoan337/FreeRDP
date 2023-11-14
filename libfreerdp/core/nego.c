@@ -62,6 +62,7 @@ struct rdp_nego
 	BOOL RestrictedAdminModeRequired;
 	BOOL GatewayEnabled;
 	BOOL GatewayBypassLocal;
+	BOOL ConnectChildSession;
 
 	rdpTransport* transport;
 };
@@ -89,6 +90,7 @@ static const char* protocol_security_string(UINT32 security)
 	return PROTOCOL_SECURITY_STRINGS[security];
 }
 
+static BOOL nego_tcp_connect(rdpNego* nego);
 static BOOL nego_transport_connect(rdpNego* nego);
 static BOOL nego_transport_disconnect(rdpNego* nego);
 static BOOL nego_security_connect(rdpNego* nego);
@@ -99,31 +101,6 @@ static BOOL nego_process_negotiation_request(rdpNego* nego, wStream* s);
 static BOOL nego_process_negotiation_response(rdpNego* nego, wStream* s);
 static BOOL nego_process_negotiation_failure(rdpNego* nego, wStream* s);
 
-static UINT32 nego_get_next_selected_protocol(rdpNego* nego)
-{
-	WINPR_ASSERT(nego);
-
-	if (nego->EnabledProtocols[PROTOCOL_RDSAAD])
-		return PROTOCOL_RDSAAD;
-
-	if (nego->EnabledProtocols[PROTOCOL_RDSTLS])
-		return PROTOCOL_RDSTLS;
-
-	if (nego->EnabledProtocols[PROTOCOL_HYBRID_EX] || nego->EnabledProtocols[PROTOCOL_HYBRID])
-		return PROTOCOL_HYBRID_EX;
-
-	if (nego->EnabledProtocols[PROTOCOL_HYBRID])
-		return PROTOCOL_HYBRID;
-
-	if (nego->EnabledProtocols[PROTOCOL_SSL])
-		return PROTOCOL_SSL;
-
-	if (nego->EnabledProtocols[PROTOCOL_RDP])
-		return PROTOCOL_RDP;
-
-	WLog_ERR(TAG, "Invalid NEGO state 0x%08" PRIx32, nego_get_state(nego));
-	return 0;
-}
 /**
  * Negotiate protocol security and connect.
  *
@@ -222,6 +199,12 @@ BOOL nego_connect(rdpNego* nego)
 				return FALSE;
 		}
 
+		if (!nego_tcp_connect(nego))
+		{
+			WLog_ERR(TAG, "Failed to connect");
+			return FALSE;
+		}
+
 		if (nego->SendPreconnectionPdu)
 		{
 			if (!nego_send_preconnection_pdu(nego))
@@ -318,7 +301,11 @@ static BOOL nego_try_connect(rdpNego* nego)
 			break;
 		case PROTOCOL_HYBRID:
 			WLog_DBG(TAG, "nego_security_connect with PROTOCOL_HYBRID");
-			nego->SecurityConnected = transport_connect_nla(nego->transport);
+			nego->SecurityConnected = transport_connect_nla(nego->transport, FALSE);
+			break;
+		case PROTOCOL_HYBRID_EX:
+			WLog_DBG(TAG, "nego_security_connect with PROTOCOL_HYBRID_EX");
+			nego->SecurityConnected = transport_connect_nla(nego->transport, TRUE);
 			break;
 		case PROTOCOL_SSL:
 			WLog_DBG(TAG, "nego_security_connect with PROTOCOL_SSL");
@@ -386,6 +373,10 @@ static BOOL nego_tcp_connect(rdpNego* nego)
 				nego->TcpConnected = transport_connect(nego->transport, nego->hostname, nego->port,
 				                                       TcpConnectTimeout);
 			}
+		}
+		else if (nego->ConnectChildSession)
+		{
+			nego->TcpConnected = transport_connect_childsession(nego->transport);
 		}
 		else
 		{
@@ -877,33 +868,36 @@ static BOOL nego_read_request_token_or_cookie(rdpNego* nego, wStream* s)
 	 * token (used for load balancing) terminated by a 0x0D0A two-byte
 	 * sequence: (check [MSFT-SDLBTS] for details!)
 	 * Cookie:[space]msts=[ip address].[port].[reserved][\x0D\x0A]
+	 * tsv://MS Terminal Services Plugin.1.[\x0D\x0A]
 	 *
 	 * cookie (variable): An optional and variable-length ANSI character
 	 * string terminated by a 0x0D0A two-byte sequence:
 	 * Cookie:[space]mstshash=[ANSISTRING][\x0D\x0A]
 	 */
-	BYTE* str = NULL;
 	UINT16 crlf = 0;
-	size_t pos, len;
+	size_t len;
 	BOOL result = FALSE;
 	BOOL isToken = FALSE;
 	size_t remain = Stream_GetRemainingLength(s);
 
 	WINPR_ASSERT(nego);
 
-	str = Stream_Pointer(s);
-	pos = Stream_GetPosition(s);
+	const char* str = Stream_ConstPointer(s);
+	const size_t pos = Stream_GetPosition(s);
 
 	/* minimum length for token is 15 */
 	if (remain < 15)
 		return TRUE;
 
-	if (memcmp(Stream_Pointer(s), "Cookie: mstshash=", 17) != 0)
+	if (memcmp(Stream_ConstPointer(s), "Cookie: mstshash=", 17) != 0)
 	{
-		if (memcmp(Stream_Pointer(s), "Cookie: msts=", 13) != 0)
+		if (memcmp(Stream_ConstPointer(s), "Cookie: msts=", 13) != 0)
 		{
-			/* remaining bytes are neither a token nor a cookie */
-			return TRUE;
+			if (memcmp(Stream_ConstPointer(s), "tsv:", 4) != 0)
+			{
+				/* remaining bytes are neither a token nor a cookie */
+				return TRUE;
+			}
 		}
 		isToken = TRUE;
 	}
@@ -932,12 +926,12 @@ static BOOL nego_read_request_token_or_cookie(rdpNego* nego, wStream* s)
 		len = Stream_GetPosition(s) - pos;
 		Stream_Write_UINT16(s, 0);
 
-		if (strnlen((char*)str, len) == len)
+		if (strnlen(str, len) == len)
 		{
 			if (isToken)
 				result = nego_set_routing_token(nego, str, len);
 			else
-				result = nego_set_cookie(nego, (char*)str);
+				result = nego_set_cookie(nego, str);
 		}
 	}
 
@@ -1194,7 +1188,7 @@ static BOOL nego_process_correlation_info(rdpNego* nego, wStream* s)
 	Stream_Seek(s, 16); /* skip reserved bytes */
 
 	WLog_INFO(TAG,
-	          "RDP_NEG_CORRELATION_INFO::correlationId = { %02 " PRIx8 ", %02" PRIx8 ", %02" PRIx8
+	          "RDP_NEG_CORRELATION_INFO::correlationId = { %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8
 	          ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8
 	          ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8 ", %02" PRIx8
 	          ", %02" PRIx8 " }",
@@ -1654,6 +1648,12 @@ void nego_set_restricted_admin_mode_required(rdpNego* nego, BOOL RestrictedAdmin
 	nego->RestrictedAdminModeRequired = RestrictedAdminModeRequired;
 }
 
+void nego_set_childsession_enabled(rdpNego* nego, BOOL ChildSessionEnabled)
+{
+	WINPR_ASSERT(nego);
+	nego->ConnectChildSession = ChildSessionEnabled;
+}
+
 void nego_set_gateway_enabled(rdpNego* nego, BOOL GatewayEnabled)
 {
 	nego->GatewayEnabled = GatewayEnabled;
@@ -1730,7 +1730,7 @@ void nego_enable_ext(rdpNego* nego, BOOL enable_ext)
 /**
  * Enable RDS AAD security protocol.
  * @param nego A pointer to the NEGO struct pointer to the negotiation structure
- * @param enable_ext whether to enable RDS AAD Auth protocol (TRUE for
+ * @param enable_aad whether to enable RDS AAD Auth protocol (TRUE for
  * enabled, FALSE for disabled)
  */
 
@@ -1756,7 +1756,7 @@ void nego_enable_aad(rdpNego* nego, BOOL enable_aad)
  * @return \b TRUE for success, \b FALSE otherwise
  */
 
-BOOL nego_set_routing_token(rdpNego* nego, const BYTE* RoutingToken, DWORD RoutingTokenLength)
+BOOL nego_set_routing_token(rdpNego* nego, const void* RoutingToken, DWORD RoutingTokenLength)
 {
 	if (RoutingTokenLength == 0)
 		return FALSE;

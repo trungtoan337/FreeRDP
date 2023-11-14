@@ -5,7 +5,7 @@
 #  PKCS11_INCLUDE_DIRS  - combined include directories
 #  PKCS11_LIBRARIES    - combined libraries to link
 
-include(FindPkgConfig)
+find_package(PkgConfig)
 
 if (PKG_CONFIG_FOUND)
 	pkg_check_modules(PKCS11 libpkcs11-helper-1)
@@ -18,7 +18,12 @@ if (PKCS11_INCLUDE_DIR AND PKCS11_LIBRARY)
 	set(PKCS11_FOUND TRUE)
 endif()
 
-# include(FindPackageHandleStandardArgs)
-# FIND_PACKAGE_HANDLE_STANDARD_ARGS(FFmpeg DEFAULT_MSG AVUTIL_FOUND AVCODEC_FOUND SWRESAMPLE_FOUND)
+set(Pkcs11_FOUND ${PKCS11_FOUND})
+set(Pkcs11_INCLUDE_DIR ${PKCS11_INCLUDE_DIR})
+set(Pkcs11_INCLUDE_DIRS ${PKCS11_INCLUDE_DIR})
+set(Pkcs11_LIBRARY ${PKCS11_LIBRARY})
+
+include(FindPackageHandleStandardArgs)
+FIND_PACKAGE_HANDLE_STANDARD_ARGS(Pkcs11 DEFAULT_MSG Pkcs11_FOUND)
 
 

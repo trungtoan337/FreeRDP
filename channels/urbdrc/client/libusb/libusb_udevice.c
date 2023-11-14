@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <winpr/wtypes.h>
 #include <winpr/sysinfo.h>
 #include <winpr/collections.h>
 
@@ -128,8 +129,10 @@ static void set_stream_id_for_buffer(struct libusb_transfer* transfer, UINT32 st
 	user_data->streamID = streamID;
 #endif
 }
-static BOOL log_libusb_result_(wLog* log, DWORD lvl, const char* fmt, const char* fkt,
-                               const char* file, size_t line, int error, ...)
+
+WINPR_ATTR_FORMAT_ARG(3, 8)
+static BOOL log_libusb_result_(wLog* log, DWORD lvl, WINPR_FORMAT_ARG const char* fmt,
+                               const char* fkt, const char* file, size_t line, int error, ...)
 {
 	WINPR_UNUSED(file);
 
@@ -149,7 +152,7 @@ static BOOL log_libusb_result_(wLog* log, DWORD lvl, const char* fmt, const char
 }
 
 #define log_libusb_result(log, lvl, fmt, error, ...) \
-	log_libusb_result_((log), (lvl), (fmt), __FUNCTION__, __FILE__, __LINE__, error, ##__VA_ARGS__)
+	log_libusb_result_((log), (lvl), (fmt), __func__, __FILE__, __LINE__, error, ##__VA_ARGS__)
 
 const char* usb_interface_class_to_string(uint8_t class)
 {
@@ -286,9 +289,13 @@ static void LIBUSB_CALL func_iso_callback(struct libusb_transfer* transfer)
 			}
 		}
 			/* fallthrough */
-
+			WINPR_FALLTHROUGH
 		case LIBUSB_TRANSFER_CANCELLED:
+			/* fallthrough */
+			WINPR_FALLTHROUGH
 		case LIBUSB_TRANSFER_TIMED_OUT:
+			/* fallthrough */
+			WINPR_FALLTHROUGH
 		case LIBUSB_TRANSFER_ERROR:
 		{
 			const UINT32 InterfaceId =
@@ -550,7 +557,7 @@ static int libusb_udev_select_interface(IUDEVICE* idev, BYTE InterfaceNumber, BY
 		{
 			WLog_Print(urbdrc->log, WLOG_INFO,
 			           "select Interface(%" PRIu8 ") curr AlternateSetting(%" PRIu8
-			           ") new AlternateSetting(" PRIu8 ")",
+			           ") new AlternateSetting(%" PRIu8 ")",
 			           InterfaceNumber, MsInterfaces[InterfaceNumber]->AlternateSetting,
 			           AlternateSetting);
 

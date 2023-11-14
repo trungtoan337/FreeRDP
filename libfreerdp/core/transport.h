@@ -24,6 +24,7 @@ typedef enum
 {
 	TRANSPORT_LAYER_TCP,
 	TRANSPORT_LAYER_TLS,
+	TRANSPORT_LAYER_NAMEDPIPE,
 	TRANSPORT_LAYER_TSG,
 	TRANSPORT_LAYER_TSG_TLS,
 	TRANSPORT_LAYER_CLOSED
@@ -34,7 +35,6 @@ typedef enum
 #include "rdstls.h"
 
 #include "gateway/tsg.h"
-#include "gateway/rdg.h"
 
 #include <winpr/sspi.h>
 #include <winpr/wlog.h>
@@ -57,11 +57,12 @@ typedef state_run_t (*TransportRecv)(rdpTransport* transport, wStream* stream, v
 FREERDP_LOCAL wStream* transport_send_stream_init(rdpTransport* transport, size_t size);
 FREERDP_LOCAL BOOL transport_connect(rdpTransport* transport, const char* hostname, UINT16 port,
                                      DWORD timeout);
+FREERDP_LOCAL BOOL transport_connect_childsession(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_attach(rdpTransport* transport, int sockfd);
 FREERDP_LOCAL BOOL transport_disconnect(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_connect_rdp(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_connect_tls(rdpTransport* transport);
-FREERDP_LOCAL BOOL transport_connect_nla(rdpTransport* transport);
+FREERDP_LOCAL BOOL transport_connect_nla(rdpTransport* transport, BOOL earlyUserAuth);
 FREERDP_LOCAL BOOL transport_connect_rdstls(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_connect_aad(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_accept_rdp(rdpTransport* transport);
@@ -129,5 +130,7 @@ FREERDP_LOCAL int transport_tcp_connect(rdpTransport* transport, const char* hos
 
 FREERDP_LOCAL rdpTransport* transport_new(rdpContext* context);
 FREERDP_LOCAL void transport_free(rdpTransport* transport);
+
+FREERDP_LOCAL void transport_set_early_user_auth_mode(rdpTransport* transport, BOOL EUAMode);
 
 #endif /* FREERDP_LIB_CORE_TRANSPORT_H */

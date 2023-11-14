@@ -463,7 +463,7 @@ static BOOL license_check_stream_capacity(wStream* s, size_t expect, const char*
 	WINPR_ASSERT(where);
 
 	if (!Stream_CheckAndLogRequiredCapacityEx(TAG, WLOG_WARN, s, expect, 1, "%s(%s:%" PRIuz ") %s",
-	                                          __FUNCTION__, __FILE__, (size_t)__LINE__, where))
+	                                          __func__, __FILE__, (size_t)__LINE__, where))
 		return FALSE;
 
 	return TRUE;
@@ -773,7 +773,7 @@ static BOOL license_send(rdpLicense* license, wStream* s, BYTE type)
 #ifdef WITH_DEBUG_LICENSE
 	WLog_DBG(TAG, "Sending %s Packet, length %" PRIu16 "", license_request_type_string(type),
 	         wMsgSize);
-	winpr_HexDump(TAG, WLOG_DEBUG, Stream_Pointer(s) - LICENSE_PREAMBLE_LENGTH, wMsgSize);
+	winpr_HexDump(TAG, WLOG_DEBUG, Stream_PointerAs(s, char) - LICENSE_PREAMBLE_LENGTH, wMsgSize);
 #endif
 	Stream_SetPosition(s, length);
 	ret = rdp_send(rdp, s, MCS_GLOBAL_CHANNEL_ID);
@@ -2101,6 +2101,8 @@ BOOL license_read_new_or_upgrade_license_packet(rdpLicense* license, wStream* s)
 
 	Stream_Read_UINT16(licenseStream, os_minor);
 	Stream_Read_UINT16(licenseStream, os_major);
+
+	WLog_DBG(TAG, "Version: %" PRIu16 ".%" PRIu16, os_major, os_minor);
 
 	/* Scope */
 	Stream_Read_UINT32(licenseStream, cbScope);

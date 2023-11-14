@@ -21,6 +21,7 @@
 #include <winpr/config.h>
 
 #include <winpr/crt.h>
+#include <winpr/wtypes.h>
 #include <winpr/assert.h>
 #include <winpr/sspi.h>
 #include <winpr/tchar.h>
@@ -94,6 +95,8 @@ static const WinPrAsn1_OID kerberos_OID = { 9, (BYTE*)"\x2a\x86\x48\x86\xf7\x12\
 static const WinPrAsn1_OID kerberos_wrong_OID = { 9,
 	                                              (BYTE*)"\x2a\x86\x48\x82\xf7\x12\x01\x02\x02" };
 static const WinPrAsn1_OID ntlm_OID = { 10, (BYTE*)"\x2b\x06\x01\x04\x01\x82\x37\x02\x02\x0a" };
+
+static const WinPrAsn1_OID negoex_OID = { 10, (BYTE*)"\x2b\x06\x01\x04\x01\x82\x37\x02\x02\x1e" };
 
 #ifdef WITH_KRB5
 static const SecPkg SecPkgTable[] = {
@@ -185,6 +188,8 @@ static const char* negotiate_mech_name(const WinPrAsn1_OID* oid)
 		return "Kerberos [wrong OID] (1.2.840.48018.1.2.2)";
 	else if (sspi_gss_oid_compare(oid, &ntlm_OID))
 		return "NTLM (1.3.6.1.4.1.311.2.2.10)";
+	else if (sspi_gss_oid_compare(oid, &negoex_OID))
+		return "NegoEx (1.3.6.1.4.1.311.2.2.30)";
 	else
 		return "Unknown mechanism";
 }
@@ -798,7 +803,9 @@ static SECURITY_STATUS SEC_ENTRY negotiate_InitializeSecurityContextW(
 				case REJECT:
 					return SEC_E_LOGON_DENIED;
 				case REQUEST_MIC:
-					context->mic = TRUE; /* fallthrough */
+					context->mic = TRUE;
+					/* fallthrough */
+					WINPR_FALLTHROUGH
 				case ACCEPT_INCOMPLETE:
 					context->state = NEGOTIATE_STATE_NEGORESP;
 					break;
@@ -1046,7 +1053,7 @@ static SECURITY_STATUS SEC_ENTRY negotiate_AcceptSecurityContext(
 				return SEC_E_INVALID_TOKEN;
 
 			init_context.mech = negotiate_GetMechByOID(&oid);
-			WLog_DBG(TAG, "Requested mechanism: %s", negotiate_mech_name(init_context.mech->oid));
+			WLog_DBG(TAG, "Requested mechanism: %s", negotiate_mech_name(&oid));
 
 			/* Microsoft may send two versions of the kerberos OID */
 			if (init_context.mech == first_mech)

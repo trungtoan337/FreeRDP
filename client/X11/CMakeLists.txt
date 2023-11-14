@@ -28,6 +28,10 @@ option(CMAKE_VERBOSE_MAKEFILE "verbose CMake makefile" ON)
 option(CMAKE_POSITION_INDEPENDENT_CODE "build with position independent code (-fPIC or -fPIE)" ON)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/)
 
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "project default" FORCE)
+endif()
+
 include(ConfigureFreeRDP)
 
 include(GNUInstallDirsWrapper)
@@ -94,6 +98,7 @@ if(WITH_CLIENT_INTERFACE)
 	else()
 		add_library(${PROJECT_NAME} ${SRCS})
 	endif()
+	target_include_directories(${PROJECT_NAME} INTERFACE $<INSTALL_INTERFACE:include>)
 
 else()
 	list(APPEND SRCS

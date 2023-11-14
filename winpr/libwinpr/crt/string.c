@@ -30,6 +30,10 @@
 #include <winpr/assert.h>
 #include <winpr/endian.h>
 
+#if defined(WITH_URIPARSER)
+#include <uriparser/Uri.h>
+#endif
+
 /* String Manipulation (CRT): http://msdn.microsoft.com/en-us/library/f0151s4x.aspx */
 
 #include "../log.h"
@@ -39,6 +43,37 @@
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #endif
 
+#if defined(WITH_URIPARSER)
+char* winpr_str_url_decode(const char* str, size_t len)
+{
+	char* dst = strndup(str, len);
+	if (!dst)
+		return NULL;
+
+	if (!uriUnescapeInPlaceExA(dst, URI_FALSE, URI_FALSE))
+	{
+		free(dst);
+		return NULL;
+	}
+
+	return dst;
+}
+
+char* winpr_str_url_encode(const char* str, size_t len)
+{
+	char* dst = calloc(len + 1, sizeof(char) * 3);
+	if (!dst)
+		return NULL;
+
+	if (!uriEscapeA(str, dst, URI_FALSE, URI_FALSE))
+	{
+		free(dst);
+		return NULL;
+	}
+	return dst;
+}
+
+#else
 static const char rfc3986[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -77,9 +112,6 @@ static char unescape(const char* what, size_t* px)
 		return 16 * hex2bin(what[1]) + hex2bin(what[2]);
 	}
 
-	if (*what == '+')
-		return ' ';
-
 	return *what;
 }
 
@@ -106,7 +138,7 @@ static char* escape(char* dst, char what)
 		return dst + 1;
 	}
 
-	sprintf(dst, "%%%02" PRIX8, what & 0xff);
+	sprintf(dst, "%%%02" PRIX8, (BYTE)(what & 0xff));
 	return dst + 3;
 }
 
@@ -124,6 +156,7 @@ char* winpr_str_url_encode(const char* str, size_t len)
 	}
 	return dst;
 }
+#endif
 
 BOOL winpr_str_append(const char* what, char* buffer, size_t size, const char* separator)
 {
@@ -142,7 +175,8 @@ BOOL winpr_str_append(const char* what, char* buffer, size_t size, const char* s
 	return TRUE;
 }
 
-int winpr_asprintf(char** s, size_t* slen, const char* templ, ...)
+WINPR_ATTR_FORMAT_ARG(3, 4)
+int winpr_asprintf(char** s, size_t* slen, WINPR_FORMAT_ARG const char* templ, ...)
 {
 	va_list ap;
 
@@ -201,6 +235,19 @@ WCHAR* _wcsdup(const WCHAR* strSource)
 		WLog_ERR(TAG, "wcsdup");
 
 	return strDestination;
+}
+
+WCHAR* _wcsncat(WCHAR* dst, const WCHAR* src, size_t sz)
+{
+	WINPR_ASSERT(dst);
+	WINPR_ASSERT(src || (sz == 0));
+
+	const size_t dlen = _wcslen(dst);
+	const size_t slen = _wcsnlen(src, sz);
+	for (size_t x = 0; x < slen; x++)
+		dst[dlen + x] = src[x];
+	dst[dlen + slen] = '\0';
+	return dst;
 }
 
 int _stricmp(const char* string1, const char* string2)
@@ -625,46 +672,6 @@ BOOL IsCharLowerW(WCHAR ch)
 		return 1;
 	else
 		return 0;
-}
-
-int lstrlenA(LPCSTR lpString)
-{
-	return (int)strlen(lpString);
-}
-
-int lstrlenW(LPCWSTR lpString)
-{
-	LPCWSTR p;
-
-	if (!lpString)
-		return 0;
-
-	p = (LPCWSTR)lpString;
-
-	while (*p)
-		p++;
-
-	return (int)(p - lpString);
-}
-
-int lstrcmpA(LPCSTR lpString1, LPCSTR lpString2)
-{
-	return strcmp(lpString1, lpString2);
-}
-
-int lstrcmpW(LPCWSTR lpString1, LPCWSTR lpString2)
-{
-	WCHAR value1, value2;
-
-	while (*lpString1 && (*lpString1 == *lpString2))
-	{
-		lpString1++;
-		lpString2++;
-	}
-
-	Data_Read_UINT16(lpString1, value1);
-	Data_Read_UINT16(lpString2, value2);
-	return value1 - value2;
 }
 
 #endif

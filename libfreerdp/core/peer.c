@@ -45,7 +45,6 @@ static state_run_t peer_recv_pdu(freerdp_peer* client, wStream* s);
 static HANDLE freerdp_peer_virtual_channel_open(freerdp_peer* client, const char* name,
                                                 UINT32 flags)
 {
-	int length;
 	UINT32 index;
 	BOOL joined = FALSE;
 	rdpMcsChannel* mcsChannel = NULL;
@@ -62,7 +61,7 @@ static HANDLE freerdp_peer_virtual_channel_open(freerdp_peer* client, const char
 	if (flags & WTS_CHANNEL_OPTION_DYNAMIC)
 		return NULL; /* not yet supported */
 
-	length = strnlen(name, 9);
+	const size_t length = strnlen(name, 9);
 
 	if (length > 8)
 		return NULL; /* SVC maximum name length is 8 */
@@ -339,55 +338,55 @@ static state_run_t peer_recv_data_pdu(freerdp_peer* client, wStream* s, UINT16 t
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(client);
 	WINPR_ASSERT(client->context);
-	WINPR_ASSERT(client->context->rdp);
-	WINPR_ASSERT(client->context->rdp->mcs);
+	rdpRdp* rdp = client->context->rdp;
+	WINPR_ASSERT(rdp);
+	WINPR_ASSERT(rdp->mcs);
 
 	update = client->context->update;
 	WINPR_ASSERT(update);
 
-	if (!rdp_read_share_data_header(client->context->rdp, s, &length, &type, &share_id,
-	                                &compressed_type, &compressed_len))
+	if (!rdp_read_share_data_header(rdp, s, &length, &type, &share_id, &compressed_type,
+	                                &compressed_len))
 		return STATE_RUN_FAILED;
 
 #ifdef WITH_DEBUG_RDP
-	WLog_Print(client->context->rdp, WLOG_DEBUG,
-	           "recv %s Data PDU (0x%02" PRIX8 "), length: %" PRIu16 "",
+	WLog_Print(rdp->log, WLOG_DEBUG, "recv %s Data PDU (0x%02" PRIX8 "), length: %" PRIu16 "",
 	           data_pdu_type_to_string(type), type, length);
 #endif
 
 	switch (type)
 	{
 		case DATA_PDU_TYPE_SYNCHRONIZE:
-			if (!rdp_recv_client_synchronize_pdu(client->context->rdp, s))
+			if (!rdp_recv_client_synchronize_pdu(rdp, s))
 				return STATE_RUN_FAILED;
 
 			break;
 
 		case DATA_PDU_TYPE_CONTROL:
-			if (!rdp_server_accept_client_control_pdu(client->context->rdp, s))
+			if (!rdp_server_accept_client_control_pdu(rdp, s))
 				return STATE_RUN_FAILED;
 
 			break;
 
 		case DATA_PDU_TYPE_INPUT:
-			if (!input_recv(client->context->rdp->input, s))
+			if (!input_recv(rdp->input, s))
 				return STATE_RUN_FAILED;
 
 			break;
 
 		case DATA_PDU_TYPE_BITMAP_CACHE_PERSISTENT_LIST:
-			if (!rdp_server_accept_client_persistent_key_list_pdu(client->context->rdp, s))
+			if (!rdp_server_accept_client_persistent_key_list_pdu(rdp, s))
 				return STATE_RUN_FAILED;
 			break;
 
 		case DATA_PDU_TYPE_FONT_LIST:
-			if (!rdp_server_accept_client_font_list_pdu(client->context->rdp, s))
+			if (!rdp_server_accept_client_font_list_pdu(rdp, s))
 				return STATE_RUN_FAILED;
 
 			return STATE_RUN_CONTINUE; // State changed, trigger rerun
 
 		case DATA_PDU_TYPE_SHUTDOWN_REQUEST:
-			mcs_send_disconnect_provider_ultimatum(client->context->rdp->mcs);
+			mcs_send_disconnect_provider_ultimatum(rdp->mcs);
 			WLog_WARN(TAG, "disconnect provider ultimatum sent to peer, closing connection");
 			return STATE_RUN_QUIT_SESSION;
 
@@ -1045,9 +1044,12 @@ static state_run_t peer_recv_callback_internal(rdpTransport* transport, wStream*
 				else
 					ret = STATE_RUN_SUCCESS;
 			}
-			if (!rdp_server_transition_to_state(
-			        rdp, CONNECTION_STATE_CAPABILITIES_EXCHANGE_CONFIRM_ACTIVE))
-				ret = STATE_RUN_FAILED;
+			if (state_run_success(ret))
+			{
+				if (!rdp_server_transition_to_state(
+				        rdp, CONNECTION_STATE_CAPABILITIES_EXCHANGE_CONFIRM_ACTIVE))
+					ret = STATE_RUN_FAILED;
+			}
 			break;
 
 		case CONNECTION_STATE_CAPABILITIES_EXCHANGE_CONFIRM_ACTIVE:
@@ -1059,7 +1061,6 @@ static state_run_t peer_recv_callback_internal(rdpTransport* transport, wStream*
 			break;
 
 		case CONNECTION_STATE_FINALIZATION_SYNC:
-			rdp_finalize_reset_flags(rdp, FALSE);
 			ret = peer_recv_pdu(client, s);
 			if (rdp_finalize_is_flag_set(rdp, FINALIZE_CS_SYNCHRONIZE_PDU))
 			{
@@ -1084,8 +1085,10 @@ static state_run_t peer_recv_callback_internal(rdpTransport* transport, wStream*
 			ret = peer_recv_pdu(client, s);
 			if (rdp_finalize_is_flag_set(rdp, FINALIZE_CS_CONTROL_REQUEST_PDU))
 			{
-				if (!rdp_server_transition_to_state(
-				        rdp, CONNECTION_STATE_FINALIZATION_PERSISTENT_KEY_LIST))
+				if (!rdp_send_server_control_granted_pdu(rdp))
+					ret = STATE_RUN_FAILED;
+				else if (!rdp_server_transition_to_state(
+				             rdp, CONNECTION_STATE_FINALIZATION_PERSISTENT_KEY_LIST))
 					ret = STATE_RUN_FAILED;
 			}
 			else

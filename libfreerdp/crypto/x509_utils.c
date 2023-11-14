@@ -103,7 +103,7 @@ char* x509_utils_get_subject(const X509* xcert)
 	}
 	subject = crypto_print_name(X509_get_subject_name(xcert));
 	if (!subject)
-		WLog_ERR(TAG, "certificate does not have a subject!");
+		WLog_WARN(TAG, "certificate does not have a subject!");
 	return subject;
 }
 
@@ -524,7 +524,7 @@ char* x509_utils_get_issuer(const X509* xcert)
 	}
 	issuer = crypto_print_name(X509_get_issuer_name(xcert));
 	if (!issuer)
-		WLog_ERR(TAG, "certificate does not have an issuer!");
+		WLog_WARN(TAG, "certificate does not have an issuer!");
 	return issuer;
 }
 
@@ -770,11 +770,11 @@ WINPR_MD_TYPE x509_utils_get_signature_alg(const X509* xcert)
 
 char* x509_utils_get_common_name(const X509* xcert, size_t* plength)
 {
-	const X509_NAME* subject_name = X509_get_subject_name(xcert);
+	X509_NAME* subject_name = X509_get_subject_name(xcert);
 	if (subject_name == NULL)
 		return NULL;
 
-	const int index = X509_NAME_get_index_by_NID((X509_NAME*)subject_name, NID_commonName, -1);
+	const int index = X509_NAME_get_index_by_NID(subject_name, NID_commonName, -1);
 	if (index < 0)
 		return NULL;
 

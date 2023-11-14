@@ -18,17 +18,14 @@
  */
 
 #include <winpr/config.h>
+#include <winpr/platform.h>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wreserved-id-macro"
-#endif
+WINPR_PRAGMA_DIAG_PUSH
+WINPR_PRAGMA_DIAG_IGNORED_RESERVED_ID_MACRO
 
 #define _FILE_OFFSET_BITS 64
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+WINPR_PRAGMA_DIAG_POP
 
 #include <errno.h>
 
@@ -41,6 +38,7 @@
 #include <winpr/shell.h>
 #include <winpr/string.h>
 #include <winpr/wlog.h>
+#include <winpr/path.h>
 #include <winpr/print.h>
 
 #include "clipboard.h"
@@ -104,11 +102,7 @@ static struct synthetic_file* make_synthetic_file(const WCHAR* local_name, const
 		goto fail;
 
 	const size_t len = _wcslen(file->remote_name);
-	for (size_t x = 0; x < len; x++)
-	{
-		if (file->remote_name[x] == '/')
-			file->remote_name[x] = '\\';
-	}
+	PathCchConvertStyleW(file->remote_name, len, PATH_STYLE_WINDOWS);
 
 	file->dwFileAttributes = fd.dwFileAttributes;
 	file->ftCreationTime = fd.ftCreationTime;
@@ -135,83 +129,6 @@ void free_synthetic_file(struct synthetic_file* file)
 	free(file->local_name);
 	free(file->remote_name);
 	free(file);
-}
-
-static unsigned char hex_to_dec(char c, BOOL* valid)
-{
-	WINPR_ASSERT(valid);
-
-	if (('0' <= c) && (c <= '9'))
-		return (c - '0');
-
-	if (('a' <= c) && (c <= 'f'))
-		return (c - 'a') + 10;
-
-	if (('A' <= c) && (c <= 'F'))
-		return (c - 'A') + 10;
-
-	*valid = FALSE;
-	return 0;
-}
-
-static BOOL decode_percent_encoded_byte(const char* str, const char* end, char* value)
-{
-	BOOL valid = TRUE;
-
-	WINPR_ASSERT(str);
-	WINPR_ASSERT(end);
-	WINPR_ASSERT(value);
-
-	if ((end < str) || ((size_t)(end - str) < strlen("%20")))
-		return FALSE;
-
-	*value = 0;
-	*value |= hex_to_dec(str[1], &valid);
-	*value <<= 4;
-	*value |= hex_to_dec(str[2], &valid);
-	return valid;
-}
-
-static char* decode_percent_encoded_string(const char* str, size_t len)
-{
-	char* buffer = NULL;
-	char* next = NULL;
-	const char* cur = str;
-	const char* lim = str + len;
-
-	WINPR_ASSERT(str);
-
-	/* Percent decoding shrinks data length, so len bytes will be enough. */
-	buffer = calloc(len + 1, sizeof(char));
-
-	if (!buffer)
-		return NULL;
-
-	next = buffer;
-
-	while (cur < lim)
-	{
-		if (*cur != '%')
-		{
-			*next++ = *cur++;
-		}
-		else
-		{
-			if (!decode_percent_encoded_byte(cur, lim, next))
-			{
-				WLog_ERR(TAG, "invalid percent encoding");
-				goto error;
-			}
-
-			cur += strlen("%20");
-			next += 1;
-		}
-	}
-
-	return buffer;
-error:
-	free(buffer);
-	return NULL;
 }
 
 /*
@@ -315,33 +232,39 @@ static BOOL add_directory_entry_to_list(wClipboard* clipboard, const WCHAR* loca
 }
 
 static BOOL do_add_directory_contents_to_list(wClipboard* clipboard, const WCHAR* local_name,
-                                              const WCHAR* remote_name, HANDLE hFind,
+                                              const WCHAR* remote_name, WCHAR* namebuf,
                                               wArrayList* files)
 {
 	WINPR_ASSERT(clipboard);
 	WINPR_ASSERT(local_name);
 	WINPR_ASSERT(remote_name);
 	WINPR_ASSERT(files);
+	WINPR_ASSERT(namebuf);
 
+	WIN32_FIND_DATAW FindData = { 0 };
+	HANDLE hFind = FindFirstFileW(namebuf, &FindData);
 	if (INVALID_HANDLE_VALUE == hFind)
 	{
+		WLog_ERR(TAG, "FindFirstFile failed (%" PRIu32 ")", GetLastError());
 		return FALSE;
 	}
-
 	while (TRUE)
 	{
-		WIN32_FIND_DATAW FileData = { 0 };
-		BOOL bRet = FindNextFileW(hFind, &FileData);
+		if (!add_directory_entry_to_list(clipboard, local_name, remote_name, &FindData, files))
+		{
+			FindClose(hFind);
+			return FALSE;
+		}
+
+		BOOL bRet = FindNextFileW(hFind, &FindData);
 		if (!bRet)
 		{
+			FindClose(hFind);
 			if (ERROR_NO_MORE_FILES == GetLastError())
 				return TRUE;
 			WLog_WARN(TAG, "FindNextFile failed (%" PRIu32 ")", GetLastError());
 			return FALSE;
 		}
-
-		if (!add_directory_entry_to_list(clipboard, local_name, remote_name, &FileData, files))
-			return FALSE;
 	}
 
 	return TRUE;
@@ -351,8 +274,6 @@ static BOOL add_directory_contents_to_list(wClipboard* clipboard, const WCHAR* l
                                            const WCHAR* remote_name, wArrayList* files)
 {
 	BOOL result = FALSE;
-	HANDLE hFind = NULL;
-	WIN32_FIND_DATAW FindData = { 0 };
 	const WCHAR wildcard[] = { '/', '*', '\0' };
 
 	WINPR_ASSERT(clipboard);
@@ -365,21 +286,12 @@ static BOOL add_directory_contents_to_list(wClipboard* clipboard, const WCHAR* l
 	if (!namebuf)
 		return FALSE;
 
-	memcpy(namebuf, local_name, len * sizeof(WCHAR));
-	memcpy(&namebuf[len], wildcard, sizeof(wildcard));
+	_wcsncat(namebuf, local_name, len);
+	_wcsncat(namebuf, wildcard, ARRAYSIZE(wildcard));
 
-	hFind = FindFirstFileW(namebuf, &FindData);
+	result = do_add_directory_contents_to_list(clipboard, local_name, remote_name, namebuf, files);
+
 	free(namebuf);
-
-	if (hFind == INVALID_HANDLE_VALUE)
-	{
-		WLog_ERR(TAG, "FindFirstFile failed (%" PRIu32 ")", GetLastError());
-		return FALSE;
-	}
-
-	result = do_add_directory_contents_to_list(clipboard, local_name, remote_name, hFind, files);
-
-	FindClose(hFind);
 	return result;
 }
 
@@ -393,7 +305,6 @@ static BOOL add_file_to_list(wClipboard* clipboard, const WCHAR* local_name,
 	WINPR_ASSERT(remote_name);
 	WINPR_ASSERT(files);
 
-	WLog_VRB(TAG, "adding file: %s", local_name);
 	file = make_synthetic_file(local_name, remote_name);
 
 	if (!file)
@@ -466,16 +377,10 @@ static BOOL process_uri(wClipboard* clipboard, const char* uri, size_t uri_len)
 	// URI is specified by RFC 8089: https://datatracker.ietf.org/doc/html/rfc8089
 	BOOL result = FALSE;
 	char* name = NULL;
-	char* localName = NULL;
 
 	WINPR_ASSERT(clipboard);
 
-	localName = parse_uri_to_local_file(uri, uri_len);
-	if (localName)
-	{
-		name = decode_percent_encoded_string(localName, strlen(localName));
-		free(localName);
-	}
+	name = parse_uri_to_local_file(uri, uri_len);
 	if (name)
 	{
 		WCHAR* wname = NULL;
@@ -821,7 +726,7 @@ static void* convert_filedescriptors_to_file_list(wClipboard* clipboard, UINT32 
 	if ((count < 1) || (count != nrDescriptors))
 		return NULL;
 
-	descriptors = (const FILEDESCRIPTORW*)Stream_Pointer(s);
+	descriptors = Stream_ConstPointer(s);
 
 	if (formatId != ClipboardGetFormatId(clipboard, mime_FileGroupDescriptorW))
 		return NULL;

@@ -75,7 +75,7 @@ char* freerdp_passphrase_read(rdpContext* context, const char* prompt, char* buf
 #include <termios.h>
 #include <freerdp/utils/signal.h>
 
-#ifdef WINPR_HAVE_POLL_H
+#if defined(WINPR_HAVE_POLL_H) && !defined(__APPLE__)
 #include <poll.h>
 #else
 #include <time.h>
@@ -85,7 +85,7 @@ char* freerdp_passphrase_read(rdpContext* context, const char* prompt, char* buf
 static int wait_for_fd(int fd, int timeout)
 {
 	int status;
-#ifdef WINPR_HAVE_POLL_H
+#if defined(WINPR_HAVE_POLL_H) && !defined(__APPLE__)
 	struct pollfd pollset = { 0 };
 	pollset.fd = fd;
 	pollset.events = POLLIN;
@@ -100,7 +100,7 @@ static int wait_for_fd(int fd, int timeout)
 	fd_set rset = { 0 };
 	struct timeval tv = { 0 };
 	FD_ZERO(&rset);
-	FD_SET(sockfd, &rset);
+	FD_SET(fd, &rset);
 
 	if (timeout)
 	{
@@ -110,7 +110,7 @@ static int wait_for_fd(int fd, int timeout)
 
 	do
 	{
-		status = select(sockfd + 1, &rset, NULL, NULL, timeout ? &tv : NULL);
+		status = select(fd + 1, &rset, NULL, NULL, timeout ? &tv : NULL);
 	} while ((status < 0) && (errno == EINTR));
 
 #endif
@@ -255,7 +255,7 @@ int freerdp_interruptible_getc(rdpContext* context, FILE* f)
 SSIZE_T freerdp_interruptible_get_line(rdpContext* context, char** plineptr, size_t* psize,
                                        FILE* stream)
 {
-	char c;
+	int c;
 	char* n;
 	size_t step = 32;
 	size_t used = 0;
@@ -285,7 +285,7 @@ SSIZE_T freerdp_interruptible_get_line(rdpContext* context, char** plineptr, siz
 
 		c = freerdp_interruptible_getc(context, stream);
 		if (c != EOF)
-			ptr[used++] = c;
+			ptr[used++] = (char)c;
 	} while ((c != '\n') && (c != '\r') && (c != EOF));
 
 	ptr[used] = '\0';

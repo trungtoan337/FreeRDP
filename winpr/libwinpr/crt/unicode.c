@@ -374,12 +374,16 @@ void ByteSwapUnicode(WCHAR* wstr, size_t length)
 SSIZE_T ConvertWCharToUtf8(const WCHAR* wstr, char* str, size_t len)
 {
 	if (!wstr)
+	{
+		if (str && len)
+			str[0] = 0;
 		return 0;
+	}
 
 	const int rc =
 	    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, str, (int)MIN(INT32_MAX, len), NULL, NULL);
 	if (rc <= 0)
-		return rc;
+		return -1;
 	else if ((size_t)rc == len)
 	{
 		if (str && (str[rc - 1] != '\0'))
@@ -398,7 +402,10 @@ SSIZE_T ConvertWCharNToUtf8(const WCHAR* wstr, size_t wlen, char* str, size_t le
 	size_t iwlen = _wcsnlen(wstr, wlen);
 
 	if (wlen > INT32_MAX)
+	{
+		SetLastError(ERROR_INVALID_PARAMETER);
 		return -1;
+	}
 
 	if (iwlen < wlen)
 	{
@@ -425,13 +432,16 @@ SSIZE_T ConvertWCharNToUtf8(const WCHAR* wstr, size_t wlen, char* str, size_t le
 
 SSIZE_T ConvertMszWCharNToUtf8(const WCHAR* wstr, size_t wlen, char* str, size_t len)
 {
-	if (len == 0)
+	if (wlen == 0)
 		return 0;
 
-	WINPR_ASSERT(str);
+	WINPR_ASSERT(wstr);
 
 	if (wlen > INT32_MAX)
+	{
+		SetLastError(ERROR_INVALID_PARAMETER);
 		return -1;
+	}
 
 	const int iwlen = MIN(INT32_MAX, len);
 	const int rc = WideCharToMultiByte(CP_UTF8, 0, wstr, (int)wlen, str, (int)iwlen, NULL, NULL);
@@ -444,12 +454,16 @@ SSIZE_T ConvertMszWCharNToUtf8(const WCHAR* wstr, size_t wlen, char* str, size_t
 SSIZE_T ConvertUtf8ToWChar(const char* str, WCHAR* wstr, size_t wlen)
 {
 	if (!str)
+	{
+		if (wstr && wlen)
+			wstr[0] = 0;
 		return 0;
+	}
 
 	const int iwlen = MIN(INT32_MAX, wlen);
 	const int rc = MultiByteToWideChar(CP_UTF8, 0, str, -1, wstr, iwlen);
 	if (rc <= 0)
-		return rc;
+		return -1;
 	else if (iwlen == rc)
 	{
 		if (wstr && (wstr[rc - 1] != '\0'))
@@ -468,7 +482,10 @@ SSIZE_T ConvertUtf8NToWChar(const char* str, size_t len, WCHAR* wstr, size_t wle
 	WINPR_ASSERT(str);
 
 	if (len > INT32_MAX)
+	{
+		SetLastError(ERROR_INVALID_PARAMETER);
 		return -1;
+	}
 	if (ilen < len)
 	{
 		isNullTerminated = TRUE;
@@ -501,7 +518,10 @@ SSIZE_T ConvertMszUtf8NToWChar(const char* str, size_t len, WCHAR* wstr, size_t 
 	WINPR_ASSERT(str);
 
 	if (len > INT32_MAX)
+	{
+		SetLastError(ERROR_INVALID_PARAMETER);
 		return -1;
+	}
 
 	const int iwlen = MIN(INT32_MAX, wlen);
 	const int rc = MultiByteToWideChar(CP_UTF8, 0, str, (int)len, wstr, (int)iwlen);
@@ -517,13 +537,13 @@ char* ConvertWCharToUtf8Alloc(const WCHAR* wstr, size_t* pUtfCharLength)
 	const SSIZE_T rc = ConvertWCharToUtf8(wstr, NULL, 0);
 	if (pUtfCharLength)
 		*pUtfCharLength = 0;
-	if (rc <= 0)
+	if (rc < 0)
 		return NULL;
 	tmp = calloc((size_t)rc + 1ull, sizeof(char));
 	if (!tmp)
 		return NULL;
 	const SSIZE_T rc2 = ConvertWCharToUtf8(wstr, tmp, (size_t)rc + 1ull);
-	if (rc2 <= 0)
+	if (rc2 < 0)
 	{
 		free(tmp);
 		return NULL;
@@ -541,13 +561,13 @@ char* ConvertWCharNToUtf8Alloc(const WCHAR* wstr, size_t wlen, size_t* pUtfCharL
 
 	if (pUtfCharLength)
 		*pUtfCharLength = 0;
-	if (rc <= 0)
+	if (rc < 0)
 		return NULL;
 	tmp = calloc((size_t)rc + 1ull, sizeof(char));
 	if (!tmp)
 		return NULL;
 	const SSIZE_T rc2 = ConvertWCharNToUtf8(wstr, wlen, tmp, (size_t)rc + 1ull);
-	if (rc2 <= 0)
+	if (rc2 < 0)
 	{
 		free(tmp);
 		return NULL;
@@ -565,13 +585,13 @@ char* ConvertMszWCharNToUtf8Alloc(const WCHAR* wstr, size_t wlen, size_t* pUtfCh
 
 	if (pUtfCharLength)
 		*pUtfCharLength = 0;
-	if (rc <= 0)
+	if (rc < 0)
 		return NULL;
 	tmp = calloc((size_t)rc + 1ull, sizeof(char));
 	if (!tmp)
 		return NULL;
 	const SSIZE_T rc2 = ConvertMszWCharNToUtf8(wstr, wlen, tmp, (size_t)rc + 1ull);
-	if (rc2 <= 0)
+	if (rc2 < 0)
 	{
 		free(tmp);
 		return NULL;
@@ -588,13 +608,13 @@ WCHAR* ConvertUtf8ToWCharAlloc(const char* str, size_t* pSize)
 	const SSIZE_T rc = ConvertUtf8ToWChar(str, NULL, 0);
 	if (pSize)
 		*pSize = 0;
-	if (rc <= 0)
+	if (rc < 0)
 		return NULL;
 	tmp = calloc((size_t)rc + 1ull, sizeof(WCHAR));
 	if (!tmp)
 		return NULL;
 	const SSIZE_T rc2 = ConvertUtf8ToWChar(str, tmp, (size_t)rc + 1ull);
-	if (rc2 <= 0)
+	if (rc2 < 0)
 	{
 		free(tmp);
 		return NULL;
@@ -611,13 +631,13 @@ WCHAR* ConvertUtf8NToWCharAlloc(const char* str, size_t len, size_t* pSize)
 	const SSIZE_T rc = ConvertUtf8NToWChar(str, len, NULL, 0);
 	if (pSize)
 		*pSize = 0;
-	if (rc <= 0)
+	if (rc < 0)
 		return NULL;
 	tmp = calloc((size_t)rc + 1ull, sizeof(WCHAR));
 	if (!tmp)
 		return NULL;
 	const SSIZE_T rc2 = ConvertUtf8NToWChar(str, len, tmp, (size_t)rc + 1ull);
-	if (rc2 <= 0)
+	if (rc2 < 0)
 	{
 		free(tmp);
 		return NULL;
@@ -634,13 +654,13 @@ WCHAR* ConvertMszUtf8NToWCharAlloc(const char* str, size_t len, size_t* pSize)
 	const SSIZE_T rc = ConvertMszUtf8NToWChar(str, len, NULL, 0);
 	if (pSize)
 		*pSize = 0;
-	if (rc <= 0)
+	if (rc < 0)
 		return NULL;
 	tmp = calloc((size_t)rc + 1ull, sizeof(WCHAR));
 	if (!tmp)
 		return NULL;
 	const SSIZE_T rc2 = ConvertMszUtf8NToWChar(str, len, tmp, (size_t)rc + 1ull);
-	if (rc2 <= 0)
+	if (rc2 < 0)
 	{
 		free(tmp);
 		return NULL;

@@ -154,8 +154,9 @@ static void xf_cliprdr_clear_cached_data(xfClipboard* clipboard);
 static UINT xf_cliprdr_send_client_format_list(xfClipboard* clipboard, BOOL force);
 static void xf_cliprdr_set_selection_owner(xfContext* xfc, xfClipboard* clipboard, Time timestamp);
 
-static void xf_cached_data_free(xfCachedData* cached_data)
+static void xf_cached_data_free(void* ptr)
 {
+	xfCachedData* cached_data = ptr;
 	if (!cached_data)
 		return;
 
@@ -780,6 +781,7 @@ static UINT xf_cliprdr_send_format_list(xfClipboard* clipboard, const CLIPRDR_FO
 		                                     .numFormats = numFormats,
 		                                     .formats = cnv.pv,
 		                                     .common.msgType = CB_FORMAT_LIST };
+	UINT ret;
 
 	WINPR_ASSERT(clipboard);
 	WINPR_ASSERT(formats || (numFormats == 0));
@@ -801,6 +803,10 @@ static UINT xf_cliprdr_send_format_list(xfClipboard* clipboard, const CLIPRDR_FO
 	xf_cliprdr_send_data_response(clipboard, NULL, NULL, 0);
 
 	xf_cliprdr_clear_cached_data(clipboard);
+
+	ret = cliprdr_file_context_notify_new_client_format_list(clipboard->file);
+	if (ret)
+		return ret;
 
 	WINPR_ASSERT(clipboard->context);
 	WINPR_ASSERT(clipboard->context->ClientFormatList);
@@ -970,6 +976,7 @@ static BOOL xf_cliprdr_get_requested_data(xfClipboard* clipboard, Atom target)
 
 		clipboard->incr_data_length = 0;
 		has_data = TRUE; /* data will be followed in PropertyNotify event */
+		XSelectInput(xfc->display, xfc->drawable, PropertyChangeMask);
 	}
 	else
 	{
@@ -1025,13 +1032,11 @@ static BOOL xf_cliprdr_get_requested_data(xfClipboard* clipboard, Atom target)
 static void xf_cliprdr_append_target(xfClipboard* clipboard, Atom target)
 {
 	WINPR_ASSERT(clipboard);
-	if (clipboard->numTargets < 0)
+
+	if (clipboard->numTargets >= ARRAYSIZE(clipboard->targets))
 		return;
 
-	if ((size_t)clipboard->numTargets >= ARRAYSIZE(clipboard->targets))
-		return;
-
-	for (int i = 0; i < clipboard->numTargets; i++)
+	for (size_t i = 0; i < clipboard->numTargets; i++)
 	{
 		if (clipboard->targets[i] == target)
 			return;
@@ -1860,6 +1865,10 @@ static UINT xf_cliprdr_server_format_list(CliprdrClientContext* context,
 		}
 	}
 
+	ret = cliprdr_file_context_notify_new_server_format_list(clipboard->file);
+	if (ret)
+		return ret;
+
 	/* CF_RAW is always implicitly supported by the server */
 	{
 		CLIPRDR_FORMAT* format = &clipboard->serverFormats[formatList->numFormats];
@@ -2163,6 +2172,7 @@ xf_cliprdr_server_format_data_response(CliprdrClientContext* context,
 			                      cached_raw_data))
 			{
 				WLog_WARN(TAG, "Failed to cache clipboard data");
+				xf_cached_data_free(cached_raw_data);
 				xf_cached_data_free(cached_data);
 			}
 		}
@@ -2240,9 +2250,12 @@ xfClipboard* xf_clipboard_new(xfContext* xfc, BOOL relieveFilenameRestriction)
 	clipboard->system = ClipboardCreate();
 	clipboard->requestedFormatId = -1;
 	clipboard->root_window = DefaultRootWindow(xfc->display);
-	selectionAtom = "CLIPBOARD";
-	if (xfc->common.context.settings->XSelectionAtom)
-		selectionAtom = xfc->common.context.settings->XSelectionAtom;
+
+	selectionAtom =
+	    freerdp_settings_get_string(xfc->common.context.settings, FreeRDP_ClipboardUseSelection);
+	if (!selectionAtom)
+		selectionAtom = "CLIPBOARD";
+
 	clipboard->clipboard_atom = XInternAtom(xfc->display, selectionAtom, FALSE);
 
 	if (clipboard->clipboard_atom == None)
@@ -2400,14 +2413,14 @@ xfClipboard* xf_clipboard_new(xfContext* xfc, BOOL relieveFilenameRestriction)
 		goto fail;
 
 	obj = HashTable_ValueObject(clipboard->cachedData);
-	obj->fnObjectFree = (OBJECT_FREE_FN)xf_cached_data_free;
+	obj->fnObjectFree = xf_cached_data_free;
 
 	clipboard->cachedRawData = HashTable_New(TRUE);
 	if (!clipboard->cachedRawData)
 		goto fail;
 
 	obj = HashTable_ValueObject(clipboard->cachedRawData);
-	obj->fnObjectFree = (OBJECT_FREE_FN)xf_cached_data_free;
+	obj->fnObjectFree = xf_cached_data_free;
 
 	return clipboard;
 

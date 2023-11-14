@@ -126,8 +126,29 @@ extern "C"
 	                                char** domain, rdp_auth_reason reason);
 	typedef BOOL (*pChooseSmartcard)(freerdp* instance, SmartcardCertInfo** cert_list, DWORD count,
 	                                 DWORD* choice, BOOL gateway);
-	typedef BOOL (*pGetAadAuthCode)(freerdp* instance, const char* hostname, char** code,
-	                                const char** client_id, const char** redirect_uri);
+
+	typedef enum
+	{
+		ACCESS_TOKEN_TYPE_AAD, /**!< oauth2 access token for RDS AAD authentication */
+		ACCESS_TOKEN_TYPE_AVD  /**!< oauth2 access token for Azure Virtual Desktop */
+	} AccessTokenType;
+
+	typedef BOOL (*pGetAccessToken)(freerdp* instance, AccessTokenType tokenType, char** token,
+	                                size_t count, ...);
+
+	/** @brief Callback used to inform about a reconnection attempt
+	 *
+	 *  @param instance The instance the information is for
+	 *  @param what A '\0' terminated string describing the module attempting to retry an operation
+	 *  @param current The current reconnection attempt, the first attempt will always have the
+	 * value \b 0
+	 *  @param userarg An optional custom argument
+	 *
+	 *  @return \b -1 in case of failure (attempts exceeded, ...) or a \b delay in [ms] to wait
+	 * before the next attempt
+	 */
+	typedef SSIZE_T (*pRetryDialog)(freerdp* instance, const char* what, size_t current,
+	                                void* userarg);
 
 	/** @brief Callback used if user interaction is required to accept
 	 *         an unknown certificate.
@@ -521,10 +542,12 @@ owned by rdpRdp */
 		                        Callback for choosing a smartcard for logon.
 		                        Used when multiple smartcards are available. Returns an index into a list
 		                        of SmartcardCertInfo pointers	*/
-		ALIGN64 pGetAadAuthCode GetAadAuthCode; /* (offset 71)
-		                                            Callback for obtaining an oauth2 authorization
-		                                           code for RDS AAD authentication */
-		UINT64 paddingE[80 - 72];               /* 72 */
+		ALIGN64 pGetAccessToken GetAccessToken; /* (offset 71)
+		                                            Callback for obtaining an access token
+		                                            for \b AccessTokenType authentication */
+		ALIGN64 pRetryDialog RetryDialog; /* (offset 72) Callback for displaying a dialog in case of
+		                                     something needs a retry */
+		UINT64 paddingE[80 - 73];         /* 73 */
 	};
 
 	struct rdp_channel_handles
@@ -604,7 +627,7 @@ owned by rdpRdp */
 	FREERDP_API const char* freerdp_get_last_error_category(UINT32 error);
 
 #define freerdp_set_last_error(context, lastError) \
-	freerdp_set_last_error_ex((context), (lastError), __FUNCTION__, __FILE__, __LINE__)
+	freerdp_set_last_error_ex((context), (lastError), __func__, __FILE__, __LINE__)
 
 #define freerdp_set_last_error_if_not(context, lastError)             \
 	do                                                                \
@@ -614,7 +637,7 @@ owned by rdpRdp */
 	} while (0)
 
 #define freerdp_set_last_error_log(context, lastError) \
-	freerdp_set_last_error_ex((context), (lastError), __FUNCTION__, __FILE__, __LINE__)
+	freerdp_set_last_error_ex((context), (lastError), __func__, __FILE__, __LINE__)
 	FREERDP_API void freerdp_set_last_error_ex(rdpContext* context, UINT32 lastError,
 	                                           const char* fkt, const char* file, int line);
 

@@ -570,7 +570,6 @@ static BOOL freerdp_dsp_decode_faad(FREERDP_DSP_CONTEXT* context, const BYTE* sr
                                     wStream* out)
 {
 	NeAACDecFrameInfo info;
-	void* output;
 	size_t offset = 0;
 
 	if (!context || !src || !out)
@@ -620,8 +619,8 @@ static BOOL freerdp_dsp_decode_faad(FREERDP_DSP_CONTEXT* context, const BYTE* sr
 		sample_buffer = Stream_Pointer(out);
 
 		cnv.cpv = &src[offset];
-		output = NeAACDecDecode2(context->faad, &info, cnv.pv, size - offset, &sample_buffer,
-		                         Stream_GetRemainingCapacity(out));
+		NeAACDecDecode2(context->faad, &info, cnv.pv, size - offset, &sample_buffer,
+		                Stream_GetRemainingCapacity(out));
 
 		if (info.error != 0)
 			return FALSE;
@@ -1328,7 +1327,7 @@ BOOL freerdp_dsp_context_reset(FREERDP_DSP_CONTEXT* context, const AUDIO_FORMAT*
 	if (context->format.wFormatTag == WAVE_FORMAT_DVI_ADPCM)
 	{
 		size_t min_frame_data =
-		    context->format.wBitsPerSample * context->format.nChannels * FramesPerPacket * 1ULL;
+		    1ull * context->format.wBitsPerSample * context->format.nChannels * FramesPerPacket;
 		size_t data_per_block = (context->format.nBlockAlign - 4 * context->format.nChannels) * 8;
 		size_t nb_block_per_packet = min_frame_data / data_per_block;
 

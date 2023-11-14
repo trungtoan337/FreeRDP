@@ -376,6 +376,7 @@ static UINT rdpgfx_recv_caps_confirm_pdu(GENERIC_CHANNEL_CALLBACK* callback, wSt
 	Stream_Read_UINT32(s, capsSet.version); /* version (4 bytes) */
 	Stream_Read_UINT32(s, capsSet.length);  /* capsDataLength (4 bytes) */
 	Stream_Read_UINT32(s, capsSet.flags);   /* capsData (4 bytes) */
+	gfx->TotalDecodedFrames = 0;
 	gfx->ConnectionCaps = capsSet;
 	DEBUG_RDPGFX(gfx->log, "RecvCapsConfirmPdu: version: 0x%08" PRIX32 " flags: 0x%08" PRIX32 "",
 	             capsSet.version, capsSet.flags);
@@ -2081,7 +2082,7 @@ static UINT rdpgfx_on_data_received(IWTSVirtualChannelCallback* pChannelCallback
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(gfx);
-	status = zgfx_decompress(gfx->zgfx, Stream_Pointer(data),
+	status = zgfx_decompress(gfx->zgfx, Stream_ConstPointer(data),
 	                         (UINT32)Stream_GetRemainingLength(data), &pDstData, &DstSize, 0);
 
 	if (status < 0)
@@ -2403,7 +2404,7 @@ static const IWTSVirtualChannelCallback rdpgfx_callbacks = { rdpgfx_on_data_rece
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT rdpgfx_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
+FREERDP_ENTRY_POINT(UINT rdpgfx_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints))
 {
 	return freerdp_generic_DVCPluginEntry(pEntryPoints, TAG, RDPGFX_DVC_CHANNEL_NAME,
 	                                      sizeof(RDPGFX_PLUGIN), sizeof(GENERIC_CHANNEL_CALLBACK),

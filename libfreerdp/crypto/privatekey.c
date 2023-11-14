@@ -390,11 +390,17 @@ BOOL freerdp_key_generate(rdpPrivateKey* key, size_t key_length)
 	}
 #endif
 
+	EVP_PKEY_free(key->evp);
+	key->evp = EVP_PKEY_new();
+
 	if (!EVP_PKEY_assign_RSA(key->evp, rsa))
 	{
+		EVP_PKEY_free(key->evp);
+		key->evp = NULL;
 		RSA_free(rsa);
 		return FALSE;
 	}
+
 	rc = TRUE;
 #else
 	EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
@@ -499,7 +505,7 @@ char* freerdp_key_get_param(const rdpPrivateKey* key, enum FREERDP_KEY_PARAM par
 
 fail:
 	BN_free(bn);
-	return buf;
+	return (char*)buf;
 }
 
 WINPR_DIGEST_CTX* freerdp_key_digest_sign(rdpPrivateKey* key, WINPR_MD_TYPE digest)

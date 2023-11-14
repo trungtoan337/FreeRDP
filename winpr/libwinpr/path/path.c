@@ -23,6 +23,7 @@
 #include <winpr/tchar.h>
 
 #include <winpr/path.h>
+#include <winpr/file.h>
 
 #define PATH_SLASH_CHR '/'
 #define PATH_SLASH_STR "/"
@@ -34,8 +35,14 @@
 #define PATH_SLASH_STR_W L"/"
 #define PATH_BACKSLASH_STR_W L"\\"
 #else
-#define PATH_SLASH_STR_W "/"
-#define PATH_BACKSLASH_STR_W "\\"
+#define PATH_SLASH_STR_W \
+	{                    \
+		'/', '\0'        \
+	}
+#define PATH_BACKSLASH_STR_W \
+	{                        \
+		'\\', '\0'           \
+	}
 #endif
 
 #ifdef _WIN32
@@ -731,7 +738,7 @@ HRESULT PathCchStripPrefixW(PWSTR pszPath, size_t cchPath)
 		if (cchPath < 6)
 			return S_FALSE;
 
-		rc = (lstrlenW(&pszPath[4]) + 1);
+		rc = (_wcslen(&pszPath[4]) + 1);
 		if ((rc < 0) || ((INT64)cchPath < rc))
 			return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
 
@@ -1077,4 +1084,90 @@ const char* GetKnownPathIdString(int id)
 		default:
 			return "KNOWN_PATH_UNKNOWN_ID";
 	}
+}
+
+static WCHAR* concat(const WCHAR* path, size_t pathlen, const WCHAR* name, size_t namelen)
+{
+	WCHAR* str = calloc(pathlen + namelen + 1, sizeof(WCHAR));
+	if (!str)
+		return NULL;
+
+	_wcsncat(str, path, pathlen);
+	_wcsncat(str, name, namelen);
+	return str;
+}
+
+BOOL winpr_RemoveDirectory_RecursiveA(LPCSTR lpPathName)
+{
+	WCHAR* name = ConvertUtf8ToWCharAlloc(lpPathName, NULL);
+	if (!name)
+		return FALSE;
+	const BOOL rc = winpr_RemoveDirectory_RecursiveW(name);
+	free(name);
+	return rc;
+}
+
+BOOL winpr_RemoveDirectory_RecursiveW(LPCWSTR lpPathName)
+{
+	BOOL ret = FALSE;
+
+	if (!lpPathName)
+		return FALSE;
+
+	const size_t pathnamelen = _wcslen(lpPathName);
+	const size_t path_slash_len = pathnamelen + 3;
+	WCHAR* path_slash = calloc(pathnamelen + 4, sizeof(WCHAR));
+	if (!path_slash)
+		return FALSE;
+	_wcsncat(path_slash, lpPathName, pathnamelen);
+
+	const WCHAR star[] = { '*', '\0' };
+	const HRESULT hr = NativePathCchAppendW(path_slash, path_slash_len, star);
+	if (FAILED(hr))
+		goto fail;
+
+	WIN32_FIND_DATAW findFileData = { 0 };
+	HANDLE dir = FindFirstFileW(path_slash, &findFileData);
+
+	if (dir == INVALID_HANDLE_VALUE)
+		goto fail;
+
+	ret = TRUE;
+	path_slash[path_slash_len - 1] = '\0'; /* remove trailing '*' */
+	do
+	{
+		const size_t len = _wcsnlen(findFileData.cFileName, ARRAYSIZE(findFileData.cFileName));
+
+		if ((len == 1 && findFileData.cFileName[0] == '.') ||
+		    (len == 2 && findFileData.cFileName[0] == '.' && findFileData.cFileName[1] == '.'))
+		{
+			continue;
+		}
+
+		WCHAR* fullpath = concat(path_slash, path_slash_len, findFileData.cFileName, len);
+		if (!fullpath)
+			goto fail;
+
+		if (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			ret = winpr_RemoveDirectory_RecursiveW(fullpath);
+		else
+			ret = DeleteFileW(fullpath);
+
+		free(fullpath);
+
+		if (!ret)
+			break;
+	} while (ret && FindNextFileW(dir, &findFileData) != 0);
+
+	FindClose(dir);
+
+	if (ret)
+	{
+		if (!RemoveDirectoryW(lpPathName))
+			ret = FALSE;
+	}
+
+fail:
+	free(path_slash);
+	return ret;
 }

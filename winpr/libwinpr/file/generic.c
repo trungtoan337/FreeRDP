@@ -873,12 +873,75 @@ BOOL WINAPI SetFileTime(HANDLE hFile, const FILETIME* lpCreationTime,
 
 typedef struct
 {
-	DIR* pDir;
+	char magic[16];
 	LPSTR lpPath;
 	LPSTR lpPattern;
-	struct dirent* pDirent;
+	DIR* pDir;
 } WIN32_FILE_SEARCH;
 
+static const char file_search_magic[] = "file_srch_magic";
+
+static WIN32_FILE_SEARCH* file_search_new(const char* name, size_t namelen, const char* pattern,
+                                          size_t patternlen)
+{
+	WIN32_FILE_SEARCH* pFileSearch = (WIN32_FILE_SEARCH*)calloc(1, sizeof(WIN32_FILE_SEARCH));
+	if (!pFileSearch)
+		return NULL;
+	strncpy(pFileSearch->magic, file_search_magic, sizeof(pFileSearch->magic));
+
+	pFileSearch->lpPath = strndup(name, namelen);
+	pFileSearch->lpPattern = strndup(pattern, patternlen);
+	if (!pFileSearch->lpPath || !pFileSearch->lpPattern)
+		goto fail;
+
+	pFileSearch->pDir = opendir(pFileSearch->lpPath);
+	if (!pFileSearch->pDir)
+	{
+		/* Work around for android:
+		 * parent directories are not accessible, so if we have a directory without pattern
+		 * try to open it directly and set pattern to '*'
+		 */
+		struct stat fileStat = { 0 };
+		if (stat(name, &fileStat) == 0)
+		{
+			if (S_ISDIR(fileStat.st_mode))
+			{
+				pFileSearch->pDir = opendir(name);
+				if (pFileSearch->pDir)
+				{
+					free(pFileSearch->lpPath);
+					free(pFileSearch->lpPattern);
+					pFileSearch->lpPath = _strdup(name);
+					pFileSearch->lpPattern = _strdup("*");
+					if (!pFileSearch->lpPath || !pFileSearch->lpPattern)
+					{
+						closedir(pFileSearch->pDir);
+						pFileSearch->pDir = NULL;
+					}
+				}
+			}
+		}
+	}
+	if (!pFileSearch->pDir)
+		goto fail;
+
+	return pFileSearch;
+fail:
+	FindClose(pFileSearch);
+	return NULL;
+}
+
+static BOOL is_valid_file_search_handle(HANDLE handle)
+{
+	WIN32_FILE_SEARCH* pFileSearch = (WIN32_FILE_SEARCH*)handle;
+	if (!pFileSearch)
+		return FALSE;
+	if (pFileSearch == INVALID_HANDLE_VALUE)
+		return FALSE;
+	if (strcmp(file_search_magic, pFileSearch->magic) != 0)
+		return FALSE;
+	return TRUE;
+}
 static BOOL FindDataFromStat(const char* path, const struct stat* fileStat,
                              LPWIN32_FIND_DATAA lpFindFileData)
 {
@@ -926,18 +989,27 @@ static BOOL FindDataFromStat(const char* path, const struct stat* fileStat,
 
 HANDLE FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData)
 {
-	BOOL isDir = FALSE;
-	struct stat fileStat;
-	WIN32_FILE_SEARCH* pFileSearch;
-
 	if (!lpFindFileData || !lpFileName)
 	{
 		SetLastError(ERROR_BAD_ARGUMENTS);
 		return INVALID_HANDLE_VALUE;
 	}
 
-	ZeroMemory(lpFindFileData, sizeof(WIN32_FIND_DATAA));
-	pFileSearch = (WIN32_FILE_SEARCH*)calloc(1, sizeof(WIN32_FILE_SEARCH));
+	const WIN32_FIND_DATAA empty = { 0 };
+	*lpFindFileData = empty;
+
+	WIN32_FILE_SEARCH* pFileSearch = NULL;
+	size_t patternlen = 0;
+	const size_t flen = strlen(lpFileName);
+	const char sep = PathGetSeparatorA(PATH_STYLE_NATIVE);
+	const char* ptr = strrchr(lpFileName, sep);
+	if (!ptr)
+		goto fail;
+	patternlen = strlen(ptr + 1);
+	if (patternlen == 0)
+		goto fail;
+
+	pFileSearch = file_search_new(lpFileName, flen - patternlen, ptr + 1, patternlen);
 
 	if (!pFileSearch)
 	{
@@ -945,102 +1017,10 @@ HANDLE FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData)
 		return INVALID_HANDLE_VALUE;
 	}
 
-	if (stat(lpFileName, &fileStat) >= 0)
-	{
-		isDir = (S_ISDIR(fileStat.st_mode) != 0);
-	}
-	else
-		errno = 0;
-
-	if (isDir)
-	{
-		pFileSearch->lpPath = _strdup(lpFileName);
-		pFileSearch->lpPattern = _strdup(".");
-	}
-	else
-	{
-		LPSTR p;
-		size_t index;
-		size_t length;
-		/* Separate lpFileName into path and pattern components */
-		p = strrchr(lpFileName, '/');
-
-		if (!p)
-			p = strrchr(lpFileName, '\\');
-
-		index = (p - lpFileName);
-		length = (p - lpFileName) + 1;
-		pFileSearch->lpPath = (LPSTR)malloc(length + 1);
-
-		if (!pFileSearch->lpPath)
-		{
-			free(pFileSearch);
-			SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-			return INVALID_HANDLE_VALUE;
-		}
-
-		CopyMemory(pFileSearch->lpPath, lpFileName, length);
-		pFileSearch->lpPath[length] = '\0';
-		length = strlen(lpFileName) - index;
-		pFileSearch->lpPattern = (LPSTR)malloc(length + 1);
-
-		if (!pFileSearch->lpPattern)
-		{
-			free(pFileSearch->lpPath);
-			free(pFileSearch);
-			SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-			return INVALID_HANDLE_VALUE;
-		}
-
-		CopyMemory(pFileSearch->lpPattern, &lpFileName[index + 1], length);
-		pFileSearch->lpPattern[length] = '\0';
-
-		/* Check if the path is a directory */
-
-		if (stat(pFileSearch->lpPath, &fileStat) < 0)
-		{
-			FindClose(pFileSearch);
-			SetLastError(map_posix_err(errno));
-			errno = 0;
-			return INVALID_HANDLE_VALUE; /* stat error */
-		}
-
-		if (S_ISDIR(fileStat.st_mode) == 0)
-		{
-			FindClose(pFileSearch);
-			return INVALID_HANDLE_VALUE; /* not a directory */
-		}
-	}
-
-	/* Open directory for reading */
-	pFileSearch->pDir = opendir(pFileSearch->lpPath);
-
-	if (!pFileSearch->pDir)
-	{
-		FindClose(pFileSearch);
-		SetLastError(map_posix_err(errno));
-		errno = 0;
-		return INVALID_HANDLE_VALUE; /* failed to open directory */
-	}
-
 	if (FindNextFileA((HANDLE)pFileSearch, lpFindFileData))
-	{
-		if (isDir)
-		{
-			const char* name = strrchr(lpFileName, '/');
-
-			if (!name)
-				name = lpFileName;
-			else
-				name++;
-
-			pFileSearch->lpPattern[0] = '*';
-			sprintf_s(lpFindFileData->cFileName, ARRAYSIZE(lpFindFileData->cFileName), "%s", name);
-		}
-
 		return (HANDLE)pFileSearch;
-	}
 
+fail:
 	FindClose(pFileSearch);
 	return INVALID_HANDLE_VALUE;
 }
@@ -1125,30 +1105,27 @@ HANDLE FindFirstFileExW(LPCWSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPV
 
 BOOL FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData)
 {
-	WIN32_FILE_SEARCH* pFileSearch;
-	struct stat fileStat;
-	char* fullpath;
-	size_t pathlen;
-	size_t namelen;
-
-	if (!hFindFile || !lpFindFileData)
+	if (!lpFindFileData)
 		return FALSE;
 
-	if (hFindFile == INVALID_HANDLE_VALUE)
+	const WIN32_FIND_DATAA empty = { 0 };
+	*lpFindFileData = empty;
+
+	if (!is_valid_file_search_handle(hFindFile))
 		return FALSE;
 
-	ZeroMemory(lpFindFileData, sizeof(WIN32_FIND_DATAA));
-	pFileSearch = (WIN32_FILE_SEARCH*)hFindFile;
-
-	while ((pFileSearch->pDirent = readdir(pFileSearch->pDir)) != NULL)
+	WIN32_FILE_SEARCH* pFileSearch = (WIN32_FILE_SEARCH*)hFindFile;
+	struct dirent* pDirent = NULL;
+	while ((pDirent = readdir(pFileSearch->pDir)) != NULL)
 	{
-		if (FilePatternMatchA(pFileSearch->pDirent->d_name, pFileSearch->lpPattern))
+		if (FilePatternMatchA(pDirent->d_name, pFileSearch->lpPattern))
 		{
-			BOOL success;
-			strncpy(lpFindFileData->cFileName, pFileSearch->pDirent->d_name, MAX_PATH);
-			namelen = strnlen(lpFindFileData->cFileName, MAX_PATH);
-			pathlen = strlen(pFileSearch->lpPath);
-			fullpath = (char*)malloc(pathlen + namelen + 2);
+			BOOL success = FALSE;
+
+			strncpy(lpFindFileData->cFileName, pDirent->d_name, MAX_PATH);
+			const size_t namelen = strnlen(lpFindFileData->cFileName, MAX_PATH);
+			size_t pathlen = strlen(pFileSearch->lpPath);
+			char* fullpath = (char*)malloc(pathlen + namelen + 2);
 
 			if (fullpath == NULL)
 			{
@@ -1161,9 +1138,10 @@ BOOL FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData)
 			 * duplicate separators */
 			if (fullpath[pathlen - 1] != '/')
 				fullpath[pathlen++] = '/';
-			memcpy(fullpath + pathlen, pFileSearch->pDirent->d_name, namelen);
+			memcpy(fullpath + pathlen, pDirent->d_name, namelen);
 			fullpath[pathlen + namelen] = 0;
 
+			struct stat fileStat = { 0 };
 			if (stat(fullpath, &fileStat) != 0)
 			{
 				free(fullpath);
@@ -1224,7 +1202,7 @@ BOOL FindClose(HANDLE hFindFile)
 	 * is a initialized HANDLE that is not freed properly.
 	 * Disable this return to stop confusing the analyzer. */
 #ifndef __clang_analyzer__
-	if (!pFileSearch || (pFileSearch == INVALID_HANDLE_VALUE))
+	if (!is_valid_file_search_handle(hFindFile))
 		return FALSE;
 #endif
 

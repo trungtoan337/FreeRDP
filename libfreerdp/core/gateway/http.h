@@ -23,60 +23,9 @@
 #include <winpr/stream.h>
 
 #include <freerdp/api.h>
+#include <freerdp/utils/http.h>
 
 #include "../../crypto/tls.h"
-
-typedef enum
-{
-	HTTP_STATUS_CONTINUE = 100,
-	HTTP_STATUS_SWITCH_PROTOCOLS = 101
-
-	,
-	HTTP_STATUS_OK = 200,
-	HTTP_STATUS_CREATED = 201,
-	HTTP_STATUS_ACCEPTED = 202,
-	HTTP_STATUS_PARTIAL = 203,
-	HTTP_STATUS_NO_CONTENT = 204,
-	HTTP_STATUS_RESET_CONTENT = 205,
-	HTTP_STATUS_PARTIAL_CONTENT = 206,
-	HTTP_STATUS_WEBDAV_MULTI_STATUS = 207
-
-	,
-	HTTP_STATUS_AMBIGUOUS = 300,
-	HTTP_STATUS_MOVED = 301,
-	HTTP_STATUS_REDIRECT = 302,
-	HTTP_STATUS_REDIRECT_METHOD = 303,
-	HTTP_STATUS_NOT_MODIFIED = 304,
-	HTTP_STATUS_USE_PROXY = 305,
-	HTTP_STATUS_REDIRECT_KEEP_VERB = 307
-
-	,
-	HTTP_STATUS_BAD_REQUEST = 400,
-	HTTP_STATUS_DENIED = 401,
-	HTTP_STATUS_PAYMENT_REQ = 402,
-	HTTP_STATUS_FORBIDDEN = 403,
-	HTTP_STATUS_NOT_FOUND = 404,
-	HTTP_STATUS_BAD_METHOD = 405,
-	HTTP_STATUS_NONE_ACCEPTABLE = 406,
-	HTTP_STATUS_PROXY_AUTH_REQ = 407,
-	HTTP_STATUS_REQUEST_TIMEOUT = 408,
-	HTTP_STATUS_CONFLICT = 409,
-	HTTP_STATUS_GONE = 410,
-	HTTP_STATUS_LENGTH_REQUIRED = 411,
-	HTTP_STATUS_PRECOND_FAILED = 412,
-	HTTP_STATUS_REQUEST_TOO_LARGE = 413,
-	HTTP_STATUS_URI_TOO_LONG = 414,
-	HTTP_STATUS_UNSUPPORTED_MEDIA = 415,
-	HTTP_STATUS_RETRY_WITH = 449
-
-	,
-	HTTP_STATUS_SERVER_ERROR = 500,
-	HTTP_STATUS_NOT_SUPPORTED = 501,
-	HTTP_STATUS_BAD_GATEWAY = 502,
-	HTTP_STATUS_SERVICE_UNAVAIL = 503,
-	HTTP_STATUS_GATEWAY_TIMEOUT = 504,
-	HTTP_STATUS_VERSION_NOT_SUP = 505
-} HTTP_STATUS;
 
 typedef enum
 {
@@ -84,6 +33,22 @@ typedef enum
 	TransferEncodingIdentity,
 	TransferEncodingChunked
 } TRANSFER_ENCODING;
+
+typedef enum
+{
+	ChunkStateLenghHeader,
+	ChunkStateData,
+	ChunkStateFooter,
+	ChunkStateEnd
+} CHUNK_STATE;
+
+typedef struct
+{
+	size_t nextOffset;
+	size_t headerFooterPos;
+	CHUNK_STATE state;
+	char lenBuffer[11];
+} http_encoding_chunked_context;
 
 /* HTTP context */
 typedef struct s_http_context HttpContext;
@@ -95,11 +60,14 @@ FREERDP_LOCAL BOOL http_context_set_method(HttpContext* context, const char* Met
 FREERDP_LOCAL const char* http_context_get_uri(HttpContext* context);
 FREERDP_LOCAL BOOL http_context_set_uri(HttpContext* context, const char* URI);
 FREERDP_LOCAL BOOL http_context_set_user_agent(HttpContext* context, const char* UserAgent);
+FREERDP_LOCAL BOOL http_context_set_x_ms_user_agent(HttpContext* context, const char* UserAgent);
 FREERDP_LOCAL BOOL http_context_set_host(HttpContext* context, const char* Host);
 FREERDP_LOCAL BOOL http_context_set_accept(HttpContext* context, const char* Accept);
 FREERDP_LOCAL BOOL http_context_set_cache_control(HttpContext* context, const char* CacheControl);
 FREERDP_LOCAL BOOL http_context_set_connection(HttpContext* context, const char* Connection);
 FREERDP_LOCAL BOOL http_context_set_pragma(HttpContext* context, const char* Pragma);
+FREERDP_LOCAL BOOL http_context_set_cookie(HttpContext* context, const char* CookieName,
+                                           const char* CookieValue);
 FREERDP_LOCAL BOOL http_context_set_rdg_connection_id(HttpContext* context,
                                                       const char* RdgConnectionId);
 FREERDP_LOCAL BOOL http_context_set_rdg_auth_scheme(HttpContext* context,
@@ -114,6 +82,7 @@ FREERDP_LOCAL HttpRequest* http_request_new(void);
 FREERDP_LOCAL void http_request_free(HttpRequest* request);
 
 FREERDP_LOCAL BOOL http_request_set_method(HttpRequest* request, const char* Method);
+FREERDP_LOCAL BOOL http_request_set_content_type(HttpRequest* request, const char* ContentType);
 FREERDP_LOCAL SSIZE_T http_request_get_content_length(HttpRequest* request);
 FREERDP_LOCAL BOOL http_request_set_content_length(HttpRequest* request, size_t length);
 
@@ -132,16 +101,24 @@ typedef struct s_http_response HttpResponse;
 FREERDP_LOCAL HttpResponse* http_response_new(void);
 FREERDP_LOCAL void http_response_free(HttpResponse* response);
 
-FREERDP_LOCAL BOOL http_response_print(HttpResponse* response);
 FREERDP_LOCAL HttpResponse* http_response_recv(rdpTls* tls, BOOL readContentLength);
 
-FREERDP_LOCAL long http_response_get_status_code(HttpResponse* response);
-FREERDP_LOCAL SSIZE_T http_response_get_body_length(HttpResponse* response);
-FREERDP_LOCAL const char* http_response_get_auth_token(HttpResponse* response, const char* method);
-FREERDP_LOCAL TRANSFER_ENCODING http_response_get_transfer_encoding(HttpResponse* response);
-FREERDP_LOCAL BOOL http_response_is_websocket(HttpContext* http, HttpResponse* response);
+FREERDP_LOCAL long http_response_get_status_code(const HttpResponse* response);
+FREERDP_LOCAL size_t http_response_get_body_length(const HttpResponse* response);
+FREERDP_LOCAL const BYTE* http_response_get_body(const HttpResponse* response);
+FREERDP_LOCAL const char* http_response_get_auth_token(const HttpResponse* response,
+                                                       const char* method);
+FREERDP_LOCAL const char* http_response_get_setcookie(const HttpResponse* response,
+                                                      const char* cookie);
+FREERDP_LOCAL TRANSFER_ENCODING http_response_get_transfer_encoding(const HttpResponse* response);
+FREERDP_LOCAL BOOL http_response_is_websocket(const HttpContext* http,
+                                              const HttpResponse* response);
 
-FREERDP_LOCAL const char* http_status_string(long status);
-FREERDP_LOCAL char* http_status_string_format(long status, char* buffer, size_t size);
+FREERDP_LOCAL void http_response_log_error_status(wLog* log, DWORD level,
+                                                  const HttpResponse* response);
+
+/* chunked read helper */
+FREERDP_LOCAL int http_chuncked_read(BIO* bio, BYTE* pBuffer, size_t size,
+                                     http_encoding_chunked_context* encodingContext);
 
 #endif /* FREERDP_LIB_CORE_GATEWAY_HTTP_H */

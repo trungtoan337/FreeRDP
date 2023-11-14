@@ -231,7 +231,11 @@ BOOL fastpath_read_header_rdp(rdpFastPath* fastpath, wStream* s, UINT16* length)
 	if (!per_read_length(s, length))
 		return FALSE;
 
-	*length = *length - Stream_GetPosition(s);
+	const size_t pos = Stream_GetPosition(s);
+	if (pos > *length)
+		return FALSE;
+
+	*length = *length - (UINT16)pos;
 	return TRUE;
 }
 
@@ -625,10 +629,12 @@ state_run_t fastpath_recv_updates(rdpFastPath* fastpath, wStream* s)
 {
 	state_run_t rc = STATE_RUN_FAILED;
 
-	if (!fastpath || !fastpath->rdp || !fastpath->rdp->update || !s)
-		return STATE_RUN_FAILED;
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(fastpath);
+	WINPR_ASSERT(fastpath->rdp);
 
 	rdpUpdate* update = fastpath->rdp->update;
+	WINPR_ASSERT(update);
 
 	if (!update_begin_paint(update))
 		goto fail;
@@ -721,6 +727,67 @@ static BOOL fastpath_recv_input_event_mouse(rdpFastPath* fastpath, wStream* s, B
 	return IFCALLRESULT(TRUE, input->MouseEvent, input, pointerFlags, xPos, yPos);
 }
 
+static BOOL fastpath_recv_input_event_relmouse(rdpFastPath* fastpath, wStream* s, BYTE eventFlags)
+{
+	rdpInput* input;
+	UINT16 pointerFlags;
+	INT16 xDelta;
+	INT16 yDelta;
+	WINPR_ASSERT(fastpath);
+	WINPR_ASSERT(fastpath->rdp);
+	WINPR_ASSERT(fastpath->rdp->context);
+	WINPR_ASSERT(fastpath->rdp->input);
+	WINPR_ASSERT(s);
+
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 6))
+		return FALSE;
+
+	input = fastpath->rdp->input;
+
+	Stream_Read_UINT16(s, pointerFlags); /* pointerFlags (2 bytes) */
+	Stream_Read_INT16(s, xDelta);        /* xDelta (2 bytes) */
+	Stream_Read_INT16(s, yDelta);        /* yDelta (2 bytes) */
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasRelativeMouseEvent))
+	{
+		WLog_ERR(TAG,
+		         "Received relative mouse event(flags=0x%04" PRIx16 ", xPos=%" PRId16
+		         ", yPos=%" PRId16 "), but we did not announce support for that",
+		         pointerFlags, xDelta, yDelta);
+		return FALSE;
+	}
+
+	return IFCALLRESULT(TRUE, input->RelMouseEvent, input, pointerFlags, xDelta, yDelta);
+}
+
+static BOOL fastpath_recv_input_event_qoe(rdpFastPath* fastpath, wStream* s, BYTE eventFlags)
+{
+	WINPR_ASSERT(fastpath);
+	WINPR_ASSERT(fastpath->rdp);
+	WINPR_ASSERT(fastpath->rdp->context);
+	WINPR_ASSERT(fastpath->rdp->input);
+	WINPR_ASSERT(s);
+
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
+		return FALSE;
+
+	rdpInput* input = fastpath->rdp->input;
+
+	UINT32 timestampMS = 0;
+	Stream_Read_UINT32(s, timestampMS); /* timestamp (4 bytes) */
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasQoeEvent))
+	{
+		WLog_ERR(TAG,
+		         "Received qoe event(timestamp=%" PRIu32
+		         "ms), but we did not announce support for that",
+		         timestampMS);
+		return FALSE;
+	}
+
+	return IFCALLRESULT(TRUE, input->QoEEvent, input, timestampMS);
+}
+
 static BOOL fastpath_recv_input_event_mousex(rdpFastPath* fastpath, wStream* s, BYTE eventFlags)
 {
 	rdpInput* input;
@@ -730,6 +797,7 @@ static BOOL fastpath_recv_input_event_mousex(rdpFastPath* fastpath, wStream* s, 
 
 	WINPR_ASSERT(fastpath);
 	WINPR_ASSERT(fastpath->rdp);
+	WINPR_ASSERT(fastpath->rdp->context);
 	WINPR_ASSERT(fastpath->rdp->input);
 	WINPR_ASSERT(s);
 
@@ -741,6 +809,16 @@ static BOOL fastpath_recv_input_event_mousex(rdpFastPath* fastpath, wStream* s, 
 	Stream_Read_UINT16(s, pointerFlags); /* pointerFlags (2 bytes) */
 	Stream_Read_UINT16(s, xPos);         /* xPos (2 bytes) */
 	Stream_Read_UINT16(s, yPos);         /* yPos (2 bytes) */
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasExtendedMouseEvent))
+	{
+		WLog_ERR(TAG,
+		         "Received extended mouse event(flags=0x%04" PRIx16 ", xPos=%" PRIu16
+		         ", yPos=%" PRIu16 "), but we did not announce support for that",
+		         pointerFlags, xPos, yPos);
+		return FALSE;
+	}
+
 	return IFCALLRESULT(TRUE, input->ExtendedMouseEvent, input, pointerFlags, xPos, yPos);
 }
 
@@ -822,6 +900,17 @@ static BOOL fastpath_recv_input_event(rdpFastPath* fastpath, wStream* s)
 			if (!fastpath_recv_input_event_unicode(fastpath, s, eventFlags))
 				return FALSE;
 
+			break;
+
+		case TS_FP_RELPOINTER_EVENT:
+			if (!fastpath_recv_input_event_relmouse(fastpath, s, eventFlags))
+				return FALSE;
+
+			break;
+
+		case TS_FP_QOETIMESTAMP_EVENT:
+			if (!fastpath_recv_input_event_qoe(fastpath, s, eventFlags))
+				return FALSE;
 			break;
 
 		default:
@@ -921,11 +1010,8 @@ wStream* fastpath_input_pdu_init(rdpFastPath* fastpath, BYTE eventFlags, BYTE ev
 
 BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, size_t iNumEvents)
 {
-	CONNECTION_STATE state;
 	BOOL rc = FALSE;
-	rdpRdp* rdp;
-	size_t length;
-	BYTE eventHeader;
+	BYTE eventHeader = 0;
 
 	WINPR_ASSERT(iNumEvents > 0);
 	if (!s)
@@ -934,10 +1020,10 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, size_t 
 	if (!fastpath)
 		goto fail;
 
-	rdp = fastpath->rdp;
+	rdpRdp* rdp = fastpath->rdp;
 	WINPR_ASSERT(rdp);
 
-	state = rdp_get_state(rdp);
+	CONNECTION_STATE state = rdp_get_state(rdp);
 	if (!rdp_is_active_state(rdp))
 	{
 		WLog_WARN(TAG, "called before activation [%s]", rdp_state_string(state));
@@ -952,7 +1038,7 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, size_t 
 	if (iNumEvents > 15)
 		goto fail;
 
-	length = Stream_GetPosition(s);
+	size_t length = Stream_GetPosition(s);
 
 	if (length >= (2 << 14))
 	{
@@ -981,7 +1067,7 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, size_t 
 			goto fail;
 
 		int sec_bytes = fastpath_get_sec_bytes(fastpath->rdp);
-		BYTE* fpInputEvents = Stream_Pointer(s) + sec_bytes;
+		BYTE* fpInputEvents = Stream_PointerAs(s, BYTE) + sec_bytes;
 		UINT16 fpInputEvents_length = length - 3 - sec_bytes;
 
 		WINPR_ASSERT(rdp->settings);
@@ -1042,8 +1128,9 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, size_t 
 	 * because we can leave room for fixed-length header, store all
 	 * the data first and then store the header.
 	 */
+	WINPR_ASSERT(length < UINT16_MAX);
 	Stream_SetPosition(s, 1);
-	Stream_Write_UINT16_BE(s, 0x8000 | length);
+	Stream_Write_UINT16_BE(s, 0x8000 | (UINT16)length);
 	Stream_SetPosition(s, length);
 	Stream_SealLength(s);
 
@@ -1232,7 +1319,7 @@ BOOL fastpath_send_update_pdu(rdpFastPath* fastpath, BYTE updateCode, wStream* s
 			if (!security_lock(rdp))
 				return FALSE;
 			UINT32 dataSize = fpUpdateHeaderSize + DstSize + pad;
-			BYTE* data = Stream_Pointer(fs) - dataSize;
+			BYTE* data = Stream_PointerAs(fs, BYTE) - dataSize;
 
 			if (rdp->settings->EncryptionMethods == ENCRYPTION_METHOD_FIPS)
 			{

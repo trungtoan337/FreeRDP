@@ -18,6 +18,9 @@
 set(MODULE_NAME "wfreerdp-server")
 set(MODULE_PREFIX "FREERDP_SERVER_WINDOWS")
 
+include (WarnUnmaintained)
+warn_unmaintained(${MODULE_NAME})
+
 include_directories(.)
 
 set(${MODULE_PREFIX}_SRCS
@@ -82,6 +85,7 @@ if(WITH_SERVER_INTERFACE)
     if (WITH_LIBRARY_VERSIONING)
         set_target_properties(${MODULE_NAME} PROPERTIES VERSION ${FREERDP_VERSION} SOVERSION ${FREERDP_API_VERSION})
     endif()
+    target_include_directories(${MODULE_NAME} INTERFACE $<INSTALL_INTERFACE:include>)
 else()
 	set(${MODULE_PREFIX}_SRCS ${${MODULE_PREFIX}_SRCS} cli/wfreerdp.c cli/wfreerdp.h)
 	add_executable(${MODULE_NAME} ${${MODULE_PREFIX}_SRCS})

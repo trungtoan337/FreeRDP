@@ -50,6 +50,8 @@ int main(int argc, char** argv)
 		  "localhost" },
 		{ "monitors", COMMAND_LINE_VALUE_OPTIONAL, "<0,1,2...>", NULL, NULL, -1, NULL,
 		  "Select or list monitors" },
+		{ "max-connections", COMMAND_LINE_VALUE_REQUIRED, "<number>", 0, NULL, -1, NULL,
+		  "maximum connections allowed to server, 0 to deactivate" },
 		{ "rect", COMMAND_LINE_VALUE_REQUIRED, "<x,y,w,h>", NULL, NULL, -1, NULL,
 		  "Select rectangle within monitor to share" },
 		{ "auth", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL,
@@ -126,12 +128,6 @@ int main(int argc, char** argv)
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, TRUE))
 		goto fail;
-
-#ifdef WITH_SHADOW_X11
-	server->authentication = TRUE;
-#else
-	server->authentication = FALSE;
-#endif
 
 	if ((status = shadow_server_parse_command_line(server, argc, argv, shadow_args)) < 0)
 	{

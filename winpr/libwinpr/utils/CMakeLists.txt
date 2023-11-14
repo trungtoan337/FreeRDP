@@ -24,7 +24,6 @@ set(COLLECTIONS_SRCS
 	collections/Stack.c
 	collections/PubSub.c
         collections/BitStream.c
-	collections/Reference.c
 	collections/ArrayList.c
 	collections/LinkedList.c
 	collections/HashTable.c
@@ -36,10 +35,6 @@ set(COLLECTIONS_SRCS
 	collections/MessageQueue.c
 	collections/MessagePipe.c)
 
-set(LODEPNG_SRCS
-	lodepng/lodepng.c
-	lodepng/lodepng.h)
-
 if (WINPR_HAVE_SYSLOG_H)
 	set(SYSLOG_SRCS
 		wlog/SyslogAppender.c
@@ -47,14 +42,19 @@ if (WINPR_HAVE_SYSLOG_H)
 	)
 endif()
 
-if (LIBSYSTEMD_FOUND)
-	set(JOURNALD_SRCS
+find_package(libsystemd)
+option(WITH_SYSTEMD "allows to export wLog to systemd journal" ${libsystemd_FOUND})
+if(WITH_LIBSYSTEMD)
+    find_package(libsystemd REQUIRED)
+    set(WINPR_HAVE_JOURNALD_H TRUE)
+    set(JOURNALD_SRCS
 		wlog/JournaldAppender.c
 		wlog/JournaldAppender.h
-	)
-
+    )
 	winpr_include_directory_add(${LIBSYSTEMD_INCLUDE_DIR})
 	winpr_library_add_private(${LIBSYSTEMD_LIBRARY})
+else()
+    unset(WINPR_HAVE_JOURNALD_H)
 endif()
 
 set(WLOG_SRCS
@@ -143,14 +143,24 @@ endif()
 
 winpr_module_add(${SRCS}
 	${COLLECTIONS_SRCS}
-	${LODEPNG_SRCS}
 	${WLOG_SRCS}
 	${ASN1_SRCS}
 )
 
 winpr_include_directory_add(
-	"lodepng"
-	".")
+	"."
+)
+
+option(WITH_LODEPNG "build WinPR with PNG support" OFF)
+if (WITH_LODEPNG)
+	find_package(lodepng REQUIRED)
+
+	winpr_definition_add(-DWITH_LODEPNG)
+	set(WINPR_WITH_PNG ON CACHE BOOL "build cache")
+
+	winpr_include_directory_add(${lodepng_INCLUDE_DIRS})
+	winpr_library_add_private(${lodepng_LIBRARIES})
+endif()
 
 if(OPENSSL_FOUND)
 	winpr_include_directory_add(${OPENSSL_INCLUDE_DIR})

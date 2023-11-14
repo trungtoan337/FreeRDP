@@ -13,7 +13,10 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "sparc")
 	set(TARGET_ARCH "sparc")
 endif()
 
-option(WITH_MANPAGES "Generate manpages." ON)
+if (NOT OPENBSD)
+	set(MANPAGE_DEF ON)
+endif()
+option(WITH_MANPAGES "Generate manpages." ${MANPAGE_DEF})
 option(WITH_PROFILER "Compile profiler." OFF)
 option(WITH_GPROF "Compile with GProf profiler." OFF)
 
@@ -65,13 +68,13 @@ option(BUILD_TESTING "Build unit tests" OFF)
 CMAKE_DEPENDENT_OPTION(TESTS_WTSAPI_EXTRA "Build extra WTSAPI tests (interactive)" OFF "BUILD_TESTING" OFF)
 CMAKE_DEPENDENT_OPTION(BUILD_COMM_TESTS "Build comm related tests (require comm port)" OFF "BUILD_TESTING" OFF)
 
-option(WITH_SAMPLE "Build sample code" OFF)
+option(WITH_SAMPLE "Build sample code" ON)
 
 option(WITH_CLIENT_COMMON "Build client common library" ON)
 CMAKE_DEPENDENT_OPTION(WITH_CLIENT "Build client binaries" ON "WITH_CLIENT_COMMON" OFF)
 CMAKE_DEPENDENT_OPTION(WITH_CLIENT_SDL "[experimental] Build SDL client " ON "WITH_CLIENT" OFF)
 
-option(WITH_SERVER "Build server binaries" OFF)
+option(WITH_SERVER "Build server binaries" ON)
 
 option(WITH_CHANNELS "Build virtual channel plugins" ON)
 
@@ -151,8 +154,8 @@ option(WITH_CLANG_FORMAT "Detect clang-format. run 'cmake --build . --target cla
 
 option(WITH_DSP_EXPERIMENTAL "Enable experimental sound encoder/decoder formats" OFF)
 
-option(WITH_FFMPEG "Enable FFMPEG for audio/video encoding/decoding" OFF)
-CMAKE_DEPENDENT_OPTION(WITH_DSP_FFMPEG "Use FFMPEG for audio encoding/decoding" OFF
+option(WITH_FFMPEG "Enable FFMPEG for audio/video encoding/decoding" ON)
+CMAKE_DEPENDENT_OPTION(WITH_DSP_FFMPEG "Use FFMPEG for audio encoding/decoding" ON
 	"WITH_FFMPEG" OFF)
 CMAKE_DEPENDENT_OPTION(WITH_VIDEO_FFMPEG "Use FFMPEG for video encoding/decoding" ON
 	"WITH_FFMPEG" OFF)
@@ -162,7 +165,7 @@ CMAKE_DEPENDENT_OPTION(WITH_VAAPI "Use FFMPEG VAAPI" OFF
 option(USE_VERSION_FROM_GIT_TAG "Extract FreeRDP version from git tag." ON)
 
 option(WITH_CAIRO    "Use CAIRO image library for screen resizing" OFF)
-option(WITH_SWSCALE  "Use SWScale image library for screen resizing" OFF)
+option(WITH_SWSCALE  "Use SWScale image library for screen resizing" ON)
 
 if (ANDROID)
 	include(ConfigOptionsAndroid)
@@ -171,6 +174,23 @@ endif(ANDROID)
 if (IOS)
 	include(ConfigOptionsiOS)
 endif(IOS)
+
+if (UNIX AND NOT APPLE)
+    find_package(ALSA)
+    find_package(PulseAudio)
+    find_package(OSS)
+    option(WITH_ALSA "use alsa for sound" ${ALSA_FOUND})
+    option(WITH_PULSE "use alsa for sound" ${PULSE_FOUND})
+    option(WITH_OSS "use alsa for sound" ${OSS_FOUND})
+endif()
+
+if (OPENBSD)
+    find_package(SNDIO)
+    option(WITH_SNDIO "use SNDIO for sound" ${SNDIO_FOUND# OpenBSD
+endif()
+
+})
+endif()
 
 option(BUILD_FUZZERS "Use BUILD_FUZZERS to build fuzzing tests" OFF)
 

@@ -294,7 +294,6 @@ static UINT serial_process_irp_write(SERIAL_DEVICE* serial, IRP* irp)
 {
 	UINT32 Length;
 	UINT64 Offset;
-	void* ptr;
 	DWORD nbWritten = 0;
 
 	if (!Stream_CheckAndLogRequiredLength(TAG, irp->input, 32))
@@ -314,7 +313,7 @@ static UINT serial_process_irp_write(SERIAL_DEVICE* serial, IRP* irp)
 	WLog_Print(serial->log, WLOG_DEBUG, "writing %" PRIu32 " bytes to %s", Length,
 	           serial->device.name);
 
-	ptr = Stream_Pointer(irp->input);
+	const void* ptr = Stream_ConstPointer(irp->input);
 	if (!Stream_SafeSeek(irp->input, Length))
 		return ERROR_INVALID_DATA;
 	/* FIXME: CommWriteFile to be replaced by WriteFile */
@@ -532,11 +531,10 @@ static void create_irp_thread(SERIAL_DEVICE* serial, IRP* irp)
 		/* Cleaning up termitating and pending irp
 		 * threads. See also: irp_thread_func() */
 		HANDLE cirpThread;
-		ULONG_PTR* ids;
-		int i, nbIds;
-		nbIds = ListDictionary_GetKeys(serial->IrpThreads, &ids);
+		ULONG_PTR* ids = NULL;
+		const size_t nbIds = ListDictionary_GetKeys(serial->IrpThreads, &ids);
 
-		for (i = 0; i < nbIds; i++)
+		for (size_t i = 0; i < nbIds; i++)
 		{
 			/* Checking if ids[i] is terminating or pending */
 			DWORD waitResult;
@@ -588,7 +586,7 @@ static void create_irp_thread(SERIAL_DEVICE* serial, IRP* irp)
 	 * FIXME: behavior documented somewhere? behavior not yet
 	 * observed with FreeRDP).
 	 */
-	key = irp->CompletionId;
+	key = irp->CompletionId + 1ull;
 	previousIrpThread = ListDictionary_GetItemValue(serial->IrpThreads, (void*)key);
 
 	if (previousIrpThread)
@@ -618,7 +616,7 @@ static void create_irp_thread(SERIAL_DEVICE* serial, IRP* irp)
 	if (ListDictionary_Count(serial->IrpThreads) >= MAX_IRP_THREADS)
 	{
 		WLog_Print(serial->log, WLOG_WARN,
-		           "Number of IRP threads threshold reached: %d, keep on anyway",
+		           "Number of IRP threads threshold reached: %" PRIuz ", keep on anyway",
 		           ListDictionary_Count(serial->IrpThreads));
 		WINPR_ASSERT(FALSE); /* unimplemented */
 		                     /* TODO: MAX_IRP_THREADS has been thought to avoid a
@@ -648,7 +646,7 @@ static void create_irp_thread(SERIAL_DEVICE* serial, IRP* irp)
 		goto error_handle;
 	}
 
-	key = irp->CompletionId;
+	key = irp->CompletionId + 1ull;
 
 	if (!ListDictionary_Add(serial->IrpThreads, (void*)key, irpThread))
 	{
@@ -665,12 +663,13 @@ error_handle:
 
 static void terminate_pending_irp_threads(SERIAL_DEVICE* serial)
 {
-	ULONG_PTR* ids;
-	int i, nbIds;
-	nbIds = ListDictionary_GetKeys(serial->IrpThreads, &ids);
-	WLog_Print(serial->log, WLOG_DEBUG, "Terminating %d IRP thread(s)", nbIds);
+	WINPR_ASSERT(serial);
 
-	for (i = 0; i < nbIds; i++)
+	ULONG_PTR* ids = NULL;
+	const size_t nbIds = ListDictionary_GetKeys(serial->IrpThreads, &ids);
+	WLog_Print(serial->log, WLOG_DEBUG, "Terminating %" PRIuz " IRP thread(s)", nbIds);
+
+	for (size_t i = 0; i < nbIds; i++)
 	{
 		HANDLE irpThread;
 		ULONG_PTR id = ids[i];
@@ -814,7 +813,7 @@ static void serial_message_free(void* obj)
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT serial_DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints)
+FREERDP_ENTRY_POINT(UINT serial_DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints))
 {
 	char* name;
 	char* path;

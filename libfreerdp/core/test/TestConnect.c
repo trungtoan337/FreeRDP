@@ -93,7 +93,7 @@ static int testTimeout(int port)
 	if (diff < timeout)
 		return -1;
 
-	printf("%s: Success!\n", __FUNCTION__);
+	printf("%s: Success!\n", __func__);
 	return 0;
 }
 
@@ -168,14 +168,14 @@ static int testAbort(int port)
 
 	if (diff > 5000)
 	{
-		printf("%s required %" PRIu32 "ms for the test\n", __FUNCTION__, diff);
+		printf("%s required %" PRIu32 "ms for the test\n", __func__, diff);
 		return -1;
 	}
 
 	if (WAIT_OBJECT_0 != status)
 		return -1;
 
-	printf("%s: Success!\n", __FUNCTION__);
+	printf("%s: Success!\n", __func__);
 	return 0;
 }
 
@@ -211,7 +211,7 @@ static BOOL prepare_certificates(const char* path)
 		return FALSE;
 
 	exe = concatenate(5, TESTING_OUTPUT_DIRECTORY, "winpr", "tools", "makecert-cli",
-	                  "winpr-makecert");
+	                  "winpr-makecert" CMAKE_EXECUTABLE_SUFFIX);
 	if (!exe)
 		return FALSE;
 	_snprintf(commandLine, sizeof(commandLine), "%s -format crt -path . -n server", exe);
@@ -261,7 +261,7 @@ static int testSuccess(int port)
 	if (!path || !wpath)
 		goto fail;
 
-	exe = GetCombinedPath(path, "sfreerdp-server");
+	exe = GetCombinedPath(path, "sfreerdp-server" CMAKE_EXECUTABLE_SUFFIX);
 
 	if (!exe)
 		goto fail;
@@ -297,11 +297,11 @@ static int testSuccess(int port)
 	WaitForSingleObject(process.hProcess, INFINITE);
 	CloseHandle(process.hProcess);
 	CloseHandle(process.hThread);
-	printf("%s: returned %d!\n", __FUNCTION__, r);
+	printf("%s: returned %d!\n", __func__, r);
 	rc = r;
 
 	if (rc == 0)
-		printf("%s: Success!\n", __FUNCTION__);
+		printf("%s: Success!\n", __func__);
 
 fail:
 	free(exe);
@@ -317,7 +317,7 @@ int TestConnect(int argc, char* argv[])
 	int random;
 	WINPR_UNUSED(argc);
 	WINPR_UNUSED(argv);
-	winpr_RAND((BYTE*)&random, sizeof(random));
+	winpr_RAND(&random, sizeof(random));
 	randomPort = 3389 + (random % 200);
 
 	/* Test connect to not existing server,

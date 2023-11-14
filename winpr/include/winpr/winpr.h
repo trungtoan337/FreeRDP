@@ -37,7 +37,7 @@
 #endif
 #endif
 #else
-#if __GNUC__ >= 4
+#if defined(__GNUC__) && (__GNUC__ >= 4)
 #define WINPR_API __attribute__((visibility("default")))
 #else
 #define WINPR_API
@@ -47,7 +47,19 @@
 #define WINPR_API
 #endif
 
-#if defined(WIN32) && !defined(__CYGWIN__)
+#if defined(__GNUC__) || defined(__clang__)
+#define WINPR_ATTR_FORMAT_ARG(pos, args) __attribute__((__format__(__printf__, pos, args)))
+#define WINPR_FORMAT_ARG /**/
+#else
+#define WINPR_ATTR_FORMAT_ARG(pos, args)
+#define WINPR_FORMAT_ARG _Printf_format_string_
+#endif
+
+#if defined(__STDC__) && defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 202311L)
+#define WINPR_DEPRECATED(obj) [[deprecated]] obj
+#define WINPR_DEPRECATED_VAR(text, obj) [[deprecated(text)]] obj
+#define WINPR_NORETURN(obj) [[noreturn]] obj
+#elif defined(WIN32) && !defined(__CYGWIN__)
 #define WINPR_DEPRECATED(obj) __declspec(deprecated) obj
 #define WINPR_DEPRECATED_VAR(text, obj) __declspec(deprecated(text)) obj
 #define WINPR_NORETURN(obj) __declspec(noreturn) obj
@@ -67,7 +79,7 @@
 #if defined _WIN32 || defined __CYGWIN__
 #define WINPR_LOCAL
 #else
-#if __GNUC__ >= 4
+#if defined(__GNUC__) && (__GNUC__ >= 4)
 #define WINPR_LOCAL __attribute__((visibility("hidden")))
 #else
 #define WINPR_LOCAL

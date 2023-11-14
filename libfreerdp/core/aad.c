@@ -25,31 +25,14 @@
 #include <freerdp/crypto/crypto.h>
 #include <freerdp/crypto/privatekey.h>
 #include "../crypto/privatekey.h"
-
-#ifdef WITH_CJSON
-#include <cjson/cJSON.h>
-#endif
+#include <freerdp/utils/http.h>
+#include <freerdp/utils/aad.h>
 
 #include <winpr/crypto.h>
-
-#include <openssl/ssl.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/err.h>
 
 #include "transport.h"
 
 #include "aad.h"
-
-#ifdef WITH_CJSON
-#if CJSON_VERSION_MAJOR == 1
-#if CJSON_VERSION_MINOR <= 7
-#if CJSON_VERSION_PATCH < 13
-#define USE_CJSON_COMPAT
-#endif
-#endif
-#endif
-#endif
 
 struct rdp_aad
 {
@@ -61,74 +44,17 @@ struct rdp_aad
 	char* kid;
 	char* nonce;
 	char* hostname;
+	char* scope;
 	wLog* log;
 };
 
-#ifdef WITH_CJSON
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-#include <openssl/core_names.h>
-#else
-static int BIO_get_line(BIO* bio, char* buf, int size)
-{
-	int pos = 0;
-
-	if (size <= 1)
-		return 0;
-
-	while (pos < size - 1)
-	{
-		char c = '\0';
-		const int rc = BIO_read(bio, &c, sizeof(c));
-		if (rc < 0)
-			return rc;
-		if (rc > 0)
-		{
-			buf[pos++] = c;
-			if (c == '\n')
-				break;
-		}
-	}
-
-	buf[pos] = '\0';
-	return pos;
-}
-#endif
-
-static const char* auth_server = "login.microsoftonline.com";
-
-static const char nonce_http_request[] = ""
-                                         "POST /common/oauth2/token HTTP/1.1\r\n"
-                                         "Host: login.microsoftonline.com\r\n"
-                                         "Content-Type: application/x-www-form-urlencoded\r\n"
-                                         "Content-Length: 24\r\n"
-                                         "\r\n"
-                                         "grant_type=srv_challenge"
-                                         "\r\n\r\n";
-
-static const char token_http_request_header[] =
-    ""
-    "POST /common/oauth2/v2.0/token HTTP/1.1\r\n"
-    "Host: login.microsoftonline.com\r\n"
-    "Content-Type: application/x-www-form-urlencoded\r\n"
-    "Content-Length: %lu\r\n"
-    "\r\n";
-static const char token_http_request_body[] =
-    ""
-    "client_id=%s&grant_type=authorization_code"
-    "&code=%s"
-    "&scope=ms-device-service%%3A%%2F%%2Ftermsrv.wvd.microsoft.com%%2Fid%%2F23444de0-61b7-42a2-"
-    "bef2-5512675a5f4d%%2Fuser_"
-    "impersonation"
-    "&req_cnf=%s"
-    "&redirect_uri=%s"
-    "\r\n\r\n";
+#ifdef WITH_AAD
 
 static BOOL get_encoded_rsa_params(wLog* wlog, rdpPrivateKey* key, char** e, char** n);
 static BOOL generate_pop_key(rdpAad* aad);
-static BOOL read_http_message(rdpAad* aad, BIO* bio, long* status_code, char** content,
-                              size_t* content_length);
 
-static SSIZE_T stream_sprintf(wStream* s, const char* fmt, ...)
+WINPR_ATTR_FORMAT_ARG(2, 3)
+static SSIZE_T stream_sprintf(wStream* s, WINPR_FORMAT_ARG const char* fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
@@ -152,13 +78,6 @@ static SSIZE_T stream_sprintf(wStream* s, const char* fmt, ...)
 	return rc2;
 }
 
-static int print_error(const char* str, size_t len, void* u)
-{
-	wLog* wlog = (wLog*)u;
-	WLog_Print(wlog, WLOG_ERROR, "%s [%" PRIuz "]", str, len);
-	return 1;
-}
-
 static BOOL json_get_object(wLog* wlog, cJSON* json, const char* key, cJSON** obj)
 {
 	WINPR_ASSERT(json);
@@ -180,6 +99,42 @@ static BOOL json_get_object(wLog* wlog, cJSON* json, const char* key, cJSON** ob
 	return TRUE;
 }
 
+#if defined(USE_CJSON_COMPAT)
+static double cJSON_GetNumberValue(const cJSON* const prop)
+{
+#ifndef NAN
+#ifdef _WIN32
+#define NAN sqrt(-1.0)
+#define COMPAT_NAN_UNDEF
+#else
+#define NAN 0.0 / 0.0
+#define COMPAT_NAN_UNDEF
+#endif
+#endif
+
+	if (!cJSON_IsNumber(prop))
+		return NAN;
+	char* val = cJSON_GetStringValue(prop);
+	if (!val)
+		return NAN;
+
+	errno = 0;
+	char* endptr = NULL;
+	double dval = strtod(val, &endptr);
+	if (val == endptr)
+		return NAN;
+	if (endptr != NULL)
+		return NAN;
+	if (errno != 0)
+		return NAN;
+	return dval;
+
+#ifdef COMPAT_NAN_UNDEF
+#undef NAN
+#endif
+}
+#endif
+
 static BOOL json_get_number(wLog* wlog, cJSON* json, const char* key, double* result)
 {
 	BOOL rc = FALSE;
@@ -192,26 +147,9 @@ static BOOL json_get_number(wLog* wlog, cJSON* json, const char* key, double* re
 		WLog_Print(wlog, WLOG_ERROR, "[json] object for key '%s' is NOT a NUMBER", key);
 		goto fail;
 	}
-#if defined(USE_CJSON_COMPAT)
-	if (!cJSON_IsNumber(prop))
-		goto fail;
-	char* val = cJSON_GetStringValue(prop);
-	if (!val)
-		goto fail;
 
-	errno = 0;
-	char* endptr = NULL;
-	double dval = strtod(val, &endptr);
-	if (val == endptr)
-		goto fail;
-	if (endptr != NULL)
-		goto fail;
-	if (errno != 0)
-		goto fail;
-	*result = dval;
-#else
 	*result = cJSON_GetNumberValue(prop);
-#endif
+
 	rc = TRUE;
 fail:
 	return rc;
@@ -256,195 +194,83 @@ static BOOL json_get_string_alloc(wLog* wlog, cJSON* json, const char* key, char
 	return *result != NULL;
 }
 
-static BIO* aad_connect_https(rdpAad* aad, SSL_CTX* ssl_ctx)
-{
-	WINPR_ASSERT(aad);
-	WINPR_ASSERT(ssl_ctx);
-
-	const int vprc = SSL_CTX_set_default_verify_paths(ssl_ctx);
-	if (vprc != 1)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Error setting verify paths");
-		return NULL;
-	}
-	const long mrc = SSL_CTX_set_mode(ssl_ctx, SSL_MODE_AUTO_RETRY);
-	if ((mrc & SSL_MODE_AUTO_RETRY) == 0)
-		WLog_Print(aad->log, WLOG_WARN, "Failed to set SSL_MODE_AUTO_RETRY");
-
-	BIO* bio = BIO_new_ssl_connect(ssl_ctx);
-	if (!bio)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Error setting up connection");
-		return NULL;
-	}
-	const long chrc = BIO_set_conn_hostname(bio, auth_server);
-	if (chrc != 1)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Error setting BIO hostname");
-		BIO_free(bio);
-		return NULL;
-	}
-	const long cprc = BIO_set_conn_port(bio, "https");
-	if (cprc != 1)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Error setting BIO port");
-		BIO_free(bio);
-		return NULL;
-	}
-	return bio;
-}
-
-static BOOL aad_logging_bio_write(rdpAad* aad, BIO* bio, const char* str)
-{
-	WINPR_ASSERT(aad);
-	WINPR_ASSERT(bio);
-	WINPR_ASSERT(str);
-
-	const size_t size = strlen(str);
-	if (size > INT_MAX)
-		return FALSE;
-	ERR_clear_error();
-	if (BIO_write(bio, str, (int)size) < 0)
-	{
-		ERR_print_errors_cb(print_error, aad->log);
-		return FALSE;
-	}
-	return TRUE;
-}
-
-static char* aad_read_response(rdpAad* aad, BIO* bio, size_t* plen, const char* what)
-{
-	WINPR_ASSERT(plen);
-
-	long status_code;
-	char* buffer = NULL;
-	size_t length = 0;
-
-	*plen = 0;
-	if (!read_http_message(aad, bio, &status_code, &buffer, &length))
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Unable to read %s HTTP response", what);
-		return NULL;
-	}
-	WLog_Print(aad->log, WLOG_DEBUG, "%s HTTP response: %s", what, buffer);
-
-	if (status_code != 200)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "%s HTTP status code: %li", what, status_code);
-		free(buffer);
-		return NULL;
-	}
-	*plen = length;
-	return buffer;
-}
-
-static cJSON* compat_cJSON_ParseWithLength(const char* value, size_t buffer_length)
-{
 #if defined(USE_CJSON_COMPAT)
+cJSON* cJSON_ParseWithLength(const char* value, size_t buffer_length)
+{
 	// Check for string '\0' termination.
 	const size_t slen = strnlen(value, buffer_length);
 	if (slen >= buffer_length)
-		return NULL;
-	return cJSON_Parse(value);
-#else
-	return cJSON_ParseWithLength(value, buffer_length);
-#endif
-}
-static BOOL aad_read_and_extract_token_from_json(rdpAad* aad, BIO* bio)
-{
-	BOOL rc = FALSE;
-	size_t blen = 0;
-	char* buffer = aad_read_response(aad, bio, &blen, "access token");
-	if (!buffer)
-		return FALSE;
-
-	cJSON* json = compat_cJSON_ParseWithLength(buffer, blen);
-	if (!json)
 	{
-		WLog_Print(aad->log, WLOG_ERROR, "Failed to parse JSON response");
+		if (value[buffer_length] != '\0')
+			return NULL;
+	}
+	return cJSON_Parse(value);
+}
+#endif
+
+static INLINE const char* aad_auth_result_to_string(DWORD code)
+{
+#define ERROR_CASE(cd, x) \
+	if (cd == (DWORD)(x)) \
+		return #x;
+
+	ERROR_CASE(code, S_OK)
+	ERROR_CASE(code, SEC_E_INVALID_TOKEN)
+	ERROR_CASE(code, E_ACCESSDENIED)
+	ERROR_CASE(code, STATUS_LOGON_FAILURE)
+	ERROR_CASE(code, STATUS_NO_LOGON_SERVERS)
+	ERROR_CASE(code, STATUS_INVALID_LOGON_HOURS)
+	ERROR_CASE(code, STATUS_INVALID_WORKSTATION)
+	ERROR_CASE(code, STATUS_PASSWORD_EXPIRED)
+	ERROR_CASE(code, STATUS_ACCOUNT_DISABLED)
+	return "Unknown error";
+}
+
+static BOOL aad_get_nonce(rdpAad* aad)
+{
+	BOOL ret = FALSE;
+	BYTE* response = NULL;
+	long resp_code = 0;
+	size_t response_length = 0;
+	cJSON* json = NULL;
+
+	if (!freerdp_http_request("https://login.microsoftonline.com/common/oauth2/v2.0/token",
+	                          "grant_type=srv_challenge", &resp_code, &response, &response_length))
+	{
+		WLog_Print(aad->log, WLOG_ERROR, "nonce request failed");
 		goto fail;
 	}
 
-	if (!json_get_string_alloc(aad->log, json, "access_token", &aad->access_token))
+	if (resp_code != HTTP_STATUS_OK)
 	{
 		WLog_Print(aad->log, WLOG_ERROR,
-		           "Could not find \"access_token\" property in JSON response");
+		           "Server unwilling to provide nonce; returned status code %li", resp_code);
+		if (response_length > 0)
+			WLog_Print(aad->log, WLOG_ERROR, "[status message] %s", response);
 		goto fail;
 	}
 
-	rc = TRUE;
-fail:
-	free(buffer);
-	cJSON_Delete(json);
-	return rc;
-}
-
-static BOOL aad_read_and_extrace_nonce_from_json(rdpAad* aad, BIO* bio)
-{
-	BOOL rc = FALSE;
-	size_t blen = 0;
-	char* buffer = aad_read_response(aad, bio, &blen, "Nonce");
-	if (!buffer)
-		return FALSE;
-
-	/* Extract the nonce from the response */
-	cJSON* json = compat_cJSON_ParseWithLength(buffer, blen);
+	json = cJSON_ParseWithLength((const char*)response, response_length);
 	if (!json)
 	{
-		WLog_Print(aad->log, WLOG_ERROR, "Failed to parse JSON response");
+		WLog_Print(aad->log, WLOG_ERROR, "Failed to parse nonce response");
 		goto fail;
 	}
 
 	if (!json_get_string_alloc(aad->log, json, "Nonce", &aad->nonce))
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Could not find \"Nonce\" property in JSON response");
 		goto fail;
-	}
-	rc = TRUE;
+
+	ret = TRUE;
+
 fail:
-	free(buffer);
+	free(response);
 	cJSON_Delete(json);
-	return rc;
-}
-
-static BOOL aad_send_token_request(rdpAad* aad, BIO* bio, const char* auth_code,
-                                   const char* client_id, const char* redirect_uri)
-{
-	BOOL rc = FALSE;
-
-	char* req_body = NULL;
-	char* req_header = NULL;
-	size_t req_body_len = 0;
-	size_t req_header_len = 0;
-	const int trc = winpr_asprintf(&req_body, &req_body_len, token_http_request_body, client_id,
-	                               auth_code, aad->kid, redirect_uri);
-	if (trc < 0)
-		goto fail;
-	const int trh = winpr_asprintf(&req_header, &req_header_len, token_http_request_header, trc);
-	if (trh < 0)
-		goto fail;
-
-	WLog_Print(aad->log, WLOG_DEBUG, "HTTP access token request: %s%s", req_header, req_body);
-
-	if (!aad_logging_bio_write(aad, bio, req_header))
-		goto fail;
-	if (!aad_logging_bio_write(aad, bio, req_body))
-		goto fail;
-	rc = TRUE;
-fail:
-	free(req_body);
-	free(req_header);
-	return rc;
+	return ret;
 }
 
 int aad_client_begin(rdpAad* aad)
 {
-	int ret = -1;
-	SSL_CTX* ssl_ctx = NULL;
-	BIO* bio = NULL;
-	char* auth_code = NULL;
-	const char* client_id = NULL;
-	const char* redirect_uri = NULL;
+	size_t size = 0;
 
 	WINPR_ASSERT(aad);
 	WINPR_ASSERT(aad->rdpcontext);
@@ -474,60 +300,37 @@ int aad_client_begin(rdpAad* aad)
 	if (p)
 		*p = '\0';
 
+	if (winpr_asprintf(&aad->scope, &size,
+	                   "ms-device-service%%3A%%2F%%2Ftermsrv.wvd.microsoft.com%%2Fname%%2F%s%%"
+	                   "2Fuser_impersonation",
+	                   aad->hostname) <= 0)
+		return -1;
+
 	if (!generate_pop_key(aad))
-		goto fail;
+		return -1;
 
 	/* Obtain an oauth authorization code */
-	if (!instance->GetAadAuthCode)
+	if (!instance->GetAccessToken)
 	{
-		WLog_Print(aad->log, WLOG_ERROR, "instance->GetAadAuthCode == NULL");
-		goto fail;
+		WLog_Print(aad->log, WLOG_ERROR, "instance->GetAccessToken == NULL");
+		return -1;
 	}
-	const BOOL arc =
-	    instance->GetAadAuthCode(instance, aad->hostname, &auth_code, &client_id, &redirect_uri);
+	const BOOL arc = instance->GetAccessToken(instance, ACCESS_TOKEN_TYPE_AAD, &aad->access_token,
+	                                          2, aad->scope, aad->kid);
 	if (!arc)
 	{
-		WLog_Print(aad->log, WLOG_ERROR, "Unable to obtain authorization code");
-		goto fail;
+		WLog_Print(aad->log, WLOG_ERROR, "Unable to obtain access token");
+		return -1;
 	}
-
-	/* Set up an ssl connection to the authorization server */
-	ssl_ctx = SSL_CTX_new(TLS_client_method());
-	if (!ssl_ctx)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Error setting up SSL context");
-		goto fail;
-	}
-
-	bio = aad_connect_https(aad, ssl_ctx);
-	if (!bio)
-		goto fail;
-
-	/* Construct and send the token request message */
-	if (!aad_send_token_request(aad, bio, auth_code, client_id, redirect_uri))
-		goto fail;
-
-	/* Extract the access token from the JSON response */
-	if (!aad_read_and_extract_token_from_json(aad, bio))
-		goto fail;
 
 	/* Send the nonce request message */
-	WLog_Print(aad->log, WLOG_DEBUG, "HTTP nonce request: %s", nonce_http_request);
+	if (!aad_get_nonce(aad))
+	{
+		WLog_Print(aad->log, WLOG_ERROR, "Unable to obtain nonce");
+		return -1;
+	}
 
-	if (!aad_logging_bio_write(aad, bio, nonce_http_request))
-		goto fail;
-
-	/* Read in the response */
-	if (!aad_read_and_extrace_nonce_from_json(aad, bio))
-		goto fail;
-
-	ret = 1;
-
-fail:
-	BIO_free_all(bio);
-	SSL_CTX_free(ssl_ctx);
-	free(auth_code);
-	return ret;
+	return 1;
 }
 
 static char* aad_create_jws_header(rdpAad* aad)
@@ -732,7 +535,7 @@ static int aad_parse_state_initial(rdpAad* aad, wStream* s)
 	if (!Stream_SafeSeek(s, jlen))
 		goto fail;
 
-	json = compat_cJSON_ParseWithLength(jstr, jlen);
+	json = cJSON_ParseWithLength(jstr, jlen);
 	if (!json)
 		goto fail;
 
@@ -749,6 +552,7 @@ static int aad_parse_state_auth(rdpAad* aad, wStream* s)
 {
 	int rc = -1;
 	double result = 0;
+	DWORD error_code = 0;
 	cJSON* json = NULL;
 	const char* jstr = Stream_PointerAs(s, char);
 	const size_t jlength = Stream_GetRemainingLength(s);
@@ -756,16 +560,18 @@ static int aad_parse_state_auth(rdpAad* aad, wStream* s)
 	if (!Stream_SafeSeek(s, jlength))
 		goto fail;
 
-	json = compat_cJSON_ParseWithLength(jstr, jlength);
+	json = cJSON_ParseWithLength(jstr, jlength);
 	if (!json)
 		goto fail;
 
 	if (!json_get_number(aad->log, json, "authentication_result", &result))
 		goto fail;
+	error_code = (DWORD)result;
 
-	if (result != 0.0)
+	if (error_code != S_OK)
 	{
-		WLog_Print(aad->log, WLOG_ERROR, "Authentication result: %lf", result);
+		WLog_Print(aad->log, WLOG_ERROR, "Authentication result: %s (0x%08" PRIx32 ")",
+		           aad_auth_result_to_string(error_code), error_code);
 		goto fail;
 	}
 	aad->state = AAD_STATE_FINAL;
@@ -791,85 +597,6 @@ int aad_recv(rdpAad* aad, wStream* s)
 			WLog_Print(aad->log, WLOG_ERROR, "Invalid AAD_STATE %d", aad->state);
 			return -1;
 	}
-}
-
-static BOOL read_http_message(rdpAad* aad, BIO* bio, long* status_code, char** content,
-                              size_t* content_length)
-{
-	char buffer[1024] = { 0 };
-
-	WINPR_ASSERT(aad);
-	WINPR_ASSERT(status_code);
-	WINPR_ASSERT(content);
-	WINPR_ASSERT(content_length);
-
-	*content_length = 0;
-	const int rb = BIO_get_line(bio, buffer, sizeof(buffer));
-	if (rb <= 0)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Error reading HTTP response [BIO_get_line %d]", rb);
-		return FALSE;
-	}
-
-	if (sscanf(buffer, "HTTP/%*u.%*u %li %*[^\r\n]\r\n", status_code) < 1)
-	{
-		WLog_Print(aad->log, WLOG_ERROR, "Invalid HTTP response status line");
-		return FALSE;
-	}
-
-	do
-	{
-		const int rbb = BIO_get_line(bio, buffer, sizeof(buffer));
-		if (rbb <= 0)
-		{
-			WLog_Print(aad->log, WLOG_ERROR, "Error reading HTTP response [BIO_get_line %d]", rbb);
-			return FALSE;
-		}
-
-		char* val = NULL;
-		char* name = strtok_s(buffer, ":", &val);
-		if (name && (_stricmp(name, "content-length") == 0))
-		{
-			errno = 0;
-			*content_length = strtoul(val, NULL, 10);
-			switch (errno)
-			{
-				case 0:
-					break;
-				default:
-					WLog_Print(aad->log, WLOG_ERROR, "strtoul(%s) returned %s [%d]", val,
-					           strerror(errno), errno);
-					return FALSE;
-			}
-		}
-	} while (strcmp(buffer, "\r\n") != 0);
-
-	if (*content_length == 0)
-		return TRUE;
-
-	*content = calloc(*content_length + 1, sizeof(char));
-	if (!*content)
-		return FALSE;
-
-	size_t offset = 0;
-	while (offset < *content_length)
-	{
-		const size_t diff = *content_length - offset;
-		int len = (int)diff;
-		if (diff > INT_MAX)
-			len = INT_MAX;
-		const int brc = BIO_read(bio, &(*content)[offset], len);
-		if (brc <= 0)
-		{
-			free(*content);
-			WLog_Print(aad->log, WLOG_ERROR,
-			           "Error reading HTTP response body (BIO_read returned %d)", brc);
-			return FALSE;
-		}
-		offset += (size_t)brc;
-	}
-
-	return TRUE;
 }
 
 static BOOL generate_rsa_2048(rdpAad* aad)
@@ -986,7 +713,7 @@ static char* bn_to_base64_url(wLog* wlog, rdpPrivateKey* key, enum FREERDP_KEY_P
 	if (!bn)
 		return NULL;
 
-	char* b64 = crypto_base64url_encode(bn, len);
+	char* b64 = (char*)crypto_base64url_encode(bn, len);
 	free(bn);
 
 	if (!b64)
@@ -1081,6 +808,7 @@ void aad_free(rdpAad* aad)
 		return;
 
 	free(aad->hostname);
+	free(aad->scope);
 	free(aad->nonce);
 	free(aad->access_token);
 	free(aad->kid);
@@ -1097,9 +825,46 @@ AAD_STATE aad_get_state(rdpAad* aad)
 
 BOOL aad_is_supported(void)
 {
-#ifdef WITH_CJSON
+#ifdef WITH_AAD
 	return TRUE;
 #else
 	return FALSE;
 #endif
 }
+
+#ifdef WITH_AAD
+char* freerdp_utils_aad_get_access_token(wLog* log, const char* data, size_t length)
+{
+	char* token = NULL;
+	cJSON* access_token_prop = NULL;
+	const char* access_token_str = NULL;
+
+	cJSON* json = cJSON_ParseWithLength(data, length);
+	if (!json)
+	{
+		WLog_Print(log, WLOG_ERROR, "Failed to parse access token response [got %" PRIuz " bytes",
+		           length);
+		goto cleanup;
+	}
+
+	access_token_prop = cJSON_GetObjectItem(json, "access_token");
+	if (!access_token_prop)
+	{
+		WLog_Print(log, WLOG_ERROR, "Response has no \"access_token\" property");
+		goto cleanup;
+	}
+
+	access_token_str = cJSON_GetStringValue(access_token_prop);
+	if (!access_token_str)
+	{
+		WLog_Print(log, WLOG_ERROR, "Invalid value for \"access_token\"");
+		goto cleanup;
+	}
+
+	token = _strdup(access_token_str);
+
+cleanup:
+	cJSON_Delete(json);
+	return token;
+}
+#endif

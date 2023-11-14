@@ -55,8 +55,6 @@ static wStream* rdpsnd_server_get_buffer(RdpsndServerContext* context)
 static UINT rdpsnd_server_send_formats(RdpsndServerContext* context)
 {
 	wStream* s = rdpsnd_server_get_buffer(context);
-	size_t pos;
-	UINT16 i;
 	BOOL status = FALSE;
 	ULONG written;
 
@@ -75,7 +73,7 @@ static UINT rdpsnd_server_send_formats(RdpsndServerContext* context)
 	Stream_Write_UINT16(s, CHANNEL_VERSION_WIN_MAX);     /* wVersion */
 	Stream_Write_UINT8(s, 0);                            /* bPad */
 
-	for (i = 0; i < context->num_server_formats; i++)
+	for (size_t i = 0; i < context->num_server_formats; i++)
 	{
 		const AUDIO_FORMAT* format = &context->server_formats[i];
 
@@ -83,7 +81,7 @@ static UINT rdpsnd_server_send_formats(RdpsndServerContext* context)
 			goto fail;
 	}
 
-	pos = Stream_GetPosition(s);
+	const size_t pos = Stream_GetPosition(s);
 	Stream_SetPosition(s, 2);
 	Stream_Write_UINT16(s, pos - 4);
 	Stream_SetPosition(s, pos);
@@ -522,7 +520,7 @@ static UINT rdpsnd_server_send_wave_pdu(RdpsndServerContext* context, UINT16 wTi
 	Stream_Seek(s, 3);                                       /* bPad */
 	start = Stream_GetPosition(s);
 	src = context->priv->out_buffer;
-	length = context->priv->out_pending_frames * context->priv->src_bytes_per_frame * 1ULL;
+	length = 1ull * context->priv->out_pending_frames * context->priv->src_bytes_per_frame;
 
 	if (!freerdp_dsp_encode(context->priv->dsp_context, context->src_format, src, length, s))
 		return ERROR_INTERNAL_ERROR;
@@ -556,7 +554,7 @@ static UINT rdpsnd_server_send_wave_pdu(RdpsndServerContext* context, UINT16 wTi
 	Stream_Write_UINT32(s, 0); /* bPad */
 	Stream_SetPosition(s, start);
 
-	if (!WTSVirtualChannelWrite(context->priv->ChannelHandle, (PCHAR)Stream_Pointer(s), end - start,
+	if (!WTSVirtualChannelWrite(context->priv->ChannelHandle, Stream_Pointer(s), end - start,
 	                            &written))
 	{
 		WLog_ERR(TAG, "WTSVirtualChannelWrite failed!");
@@ -1144,8 +1142,8 @@ UINT rdpsnd_server_handle_messages(RdpsndServerContext* context)
 	priv = context->priv;
 	s = priv->input_stream;
 
-	if (!WTSVirtualChannelRead(priv->ChannelHandle, 0, (PCHAR)Stream_Pointer(s),
-	                           priv->expectedBytes, &bytesReturned))
+	if (!WTSVirtualChannelRead(priv->ChannelHandle, 0, Stream_Pointer(s), priv->expectedBytes,
+	                           &bytesReturned))
 	{
 		if (GetLastError() == ERROR_NO_DATA)
 			return ERROR_NO_DATA;

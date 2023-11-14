@@ -19,6 +19,7 @@ set(MODULE_NAME "freerdp-utils")
 set(MODULE_PREFIX "FREERDP_UTILS")
 
 set(${MODULE_PREFIX}_SRCS
+	encoded_types.c
 	passphrase.c
 	cliprdr_utils.c
 	rdpdr_utils.c
@@ -33,6 +34,7 @@ set(${MODULE_PREFIX}_SRCS
 	smartcard_pack.c
 	smartcard_call.c
 	stopwatch.c
+	http.c
 )
 
 freerdp_module_add(${${MODULE_PREFIX}_SRCS})

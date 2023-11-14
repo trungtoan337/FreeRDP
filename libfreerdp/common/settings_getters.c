@@ -123,6 +123,9 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 		case FreeRDP_CompressionEnabled:
 			return settings->CompressionEnabled;
 
+		case FreeRDP_ConnectChildSession:
+			return settings->ConnectChildSession;
+
 		case FreeRDP_ConsoleSession:
 			return settings->ConsoleSession;
 
@@ -231,6 +234,9 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 		case FreeRDP_Fullscreen:
 			return settings->Fullscreen;
 
+		case FreeRDP_GatewayArmTransport:
+			return settings->GatewayArmTransport;
+
 		case FreeRDP_GatewayBypassLocal:
 			return settings->GatewayBypassLocal;
 
@@ -296,6 +302,12 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 
 		case FreeRDP_HasMonitorAttributes:
 			return settings->HasMonitorAttributes;
+
+		case FreeRDP_HasQoeEvent:
+			return settings->HasQoeEvent;
+
+		case FreeRDP_HasRelativeMouseEvent:
+			return settings->HasRelativeMouseEvent;
 
 		case FreeRDP_HiDefRemoteApp:
 			return settings->HiDefRemoteApp;
@@ -428,6 +440,9 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 
 		case FreeRDP_RedirectSmartCards:
 			return settings->RedirectSmartCards;
+
+		case FreeRDP_RedirectWebAuthN:
+			return settings->RedirectWebAuthN;
 
 		case FreeRDP_RefreshRect:
 			return settings->RefreshRect;
@@ -576,6 +591,9 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 		case FreeRDP_UnmapButtons:
 			return settings->UnmapButtons;
 
+		case FreeRDP_UseCommonStdioCallbacks:
+			return settings->UseCommonStdioCallbacks;
+
 		case FreeRDP_UseMultimon:
 			return settings->UseMultimon;
 
@@ -706,6 +724,10 @@ BOOL freerdp_settings_set_bool(rdpSettings* settings, size_t id, BOOL val)
 
 		case FreeRDP_CompressionEnabled:
 			settings->CompressionEnabled = cnv.c;
+			break;
+
+		case FreeRDP_ConnectChildSession:
+			settings->ConnectChildSession = cnv.c;
 			break;
 
 		case FreeRDP_ConsoleSession:
@@ -852,6 +874,10 @@ BOOL freerdp_settings_set_bool(rdpSettings* settings, size_t id, BOOL val)
 			settings->Fullscreen = cnv.c;
 			break;
 
+		case FreeRDP_GatewayArmTransport:
+			settings->GatewayArmTransport = cnv.c;
+			break;
+
 		case FreeRDP_GatewayBypassLocal:
 			settings->GatewayBypassLocal = cnv.c;
 			break;
@@ -938,6 +964,14 @@ BOOL freerdp_settings_set_bool(rdpSettings* settings, size_t id, BOOL val)
 
 		case FreeRDP_HasMonitorAttributes:
 			settings->HasMonitorAttributes = cnv.c;
+			break;
+
+		case FreeRDP_HasQoeEvent:
+			settings->HasQoeEvent = cnv.c;
+			break;
+
+		case FreeRDP_HasRelativeMouseEvent:
+			settings->HasRelativeMouseEvent = cnv.c;
 			break;
 
 		case FreeRDP_HiDefRemoteApp:
@@ -1114,6 +1148,10 @@ BOOL freerdp_settings_set_bool(rdpSettings* settings, size_t id, BOOL val)
 
 		case FreeRDP_RedirectSmartCards:
 			settings->RedirectSmartCards = cnv.c;
+			break;
+
+		case FreeRDP_RedirectWebAuthN:
+			settings->RedirectWebAuthN = cnv.c;
 			break;
 
 		case FreeRDP_RefreshRect:
@@ -1310,6 +1348,10 @@ BOOL freerdp_settings_set_bool(rdpSettings* settings, size_t id, BOOL val)
 
 		case FreeRDP_UnmapButtons:
 			settings->UnmapButtons = cnv.c;
+			break;
+
+		case FreeRDP_UseCommonStdioCallbacks:
+			settings->UseCommonStdioCallbacks = cnv.c;
 			break;
 
 		case FreeRDP_UseMultimon:
@@ -1635,6 +1677,9 @@ UINT32 freerdp_settings_get_uint32(const rdpSettings* settings, size_t id)
 
 		case FreeRDP_ExtEncryptionMethods:
 			return settings->ExtEncryptionMethods;
+
+		case FreeRDP_FakeMouseMotionInterval:
+			return settings->FakeMouseMotionInterval;
 
 		case FreeRDP_Floatbar:
 			return settings->Floatbar;
@@ -2061,6 +2106,10 @@ BOOL freerdp_settings_set_uint32(rdpSettings* settings, size_t id, UINT32 val)
 
 		case FreeRDP_ExtEncryptionMethods:
 			settings->ExtEncryptionMethods = cnv.c;
+			break;
+
+		case FreeRDP_FakeMouseMotionInterval:
+			settings->FakeMouseMotionInterval = cnv.c;
 			break;
 
 		case FreeRDP_Floatbar:
@@ -2594,6 +2643,9 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 		case FreeRDP_ClientProductId:
 			return settings->ClientProductId;
 
+		case FreeRDP_ClipboardUseSelection:
+			return settings->ClipboardUseSelection;
+
 		case FreeRDP_ComputerName:
 			return settings->ComputerName;
 
@@ -2630,14 +2682,41 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 		case FreeRDP_GatewayAccessToken:
 			return settings->GatewayAccessToken;
 
+		case FreeRDP_GatewayAvdAadtenantid:
+			return settings->GatewayAvdAadtenantid;
+
+		case FreeRDP_GatewayAvdActivityhint:
+			return settings->GatewayAvdActivityhint;
+
+		case FreeRDP_GatewayAvdArmpath:
+			return settings->GatewayAvdArmpath;
+
+		case FreeRDP_GatewayAvdDiagnosticserviceurl:
+			return settings->GatewayAvdDiagnosticserviceurl;
+
+		case FreeRDP_GatewayAvdGeo:
+			return settings->GatewayAvdGeo;
+
+		case FreeRDP_GatewayAvdHubdiscoverygeourl:
+			return settings->GatewayAvdHubdiscoverygeourl;
+
+		case FreeRDP_GatewayAvdWvdEndpointPool:
+			return settings->GatewayAvdWvdEndpointPool;
+
 		case FreeRDP_GatewayDomain:
 			return settings->GatewayDomain;
 
 		case FreeRDP_GatewayHostname:
 			return settings->GatewayHostname;
 
+		case FreeRDP_GatewayHttpExtAuthBearer:
+			return settings->GatewayHttpExtAuthBearer;
+
 		case FreeRDP_GatewayPassword:
 			return settings->GatewayPassword;
+
+		case FreeRDP_GatewayUrl:
+			return settings->GatewayUrl;
 
 		case FreeRDP_GatewayUsername:
 			return settings->GatewayUsername;
@@ -2671,6 +2750,9 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 
 		case FreeRDP_KerberosStartTime:
 			return settings->KerberosStartTime;
+
+		case FreeRDP_KeyboardPipeName:
+			return settings->KeyboardPipeName;
 
 		case FreeRDP_KeyboardRemappingList:
 			return settings->KeyboardRemappingList;
@@ -2797,6 +2879,9 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 
 		case FreeRDP_Username:
 			return settings->Username;
+
+		case FreeRDP_WinSCardModule:
+			return settings->WinSCardModule;
 
 		case FreeRDP_WindowTitle:
 			return settings->WindowTitle;
@@ -2863,6 +2948,9 @@ char* freerdp_settings_get_string_writable(rdpSettings* settings, size_t id)
 		case FreeRDP_ClientProductId:
 			return settings->ClientProductId;
 
+		case FreeRDP_ClipboardUseSelection:
+			return settings->ClipboardUseSelection;
+
 		case FreeRDP_ComputerName:
 			return settings->ComputerName;
 
@@ -2899,14 +2987,41 @@ char* freerdp_settings_get_string_writable(rdpSettings* settings, size_t id)
 		case FreeRDP_GatewayAccessToken:
 			return settings->GatewayAccessToken;
 
+		case FreeRDP_GatewayAvdAadtenantid:
+			return settings->GatewayAvdAadtenantid;
+
+		case FreeRDP_GatewayAvdActivityhint:
+			return settings->GatewayAvdActivityhint;
+
+		case FreeRDP_GatewayAvdArmpath:
+			return settings->GatewayAvdArmpath;
+
+		case FreeRDP_GatewayAvdDiagnosticserviceurl:
+			return settings->GatewayAvdDiagnosticserviceurl;
+
+		case FreeRDP_GatewayAvdGeo:
+			return settings->GatewayAvdGeo;
+
+		case FreeRDP_GatewayAvdHubdiscoverygeourl:
+			return settings->GatewayAvdHubdiscoverygeourl;
+
+		case FreeRDP_GatewayAvdWvdEndpointPool:
+			return settings->GatewayAvdWvdEndpointPool;
+
 		case FreeRDP_GatewayDomain:
 			return settings->GatewayDomain;
 
 		case FreeRDP_GatewayHostname:
 			return settings->GatewayHostname;
 
+		case FreeRDP_GatewayHttpExtAuthBearer:
+			return settings->GatewayHttpExtAuthBearer;
+
 		case FreeRDP_GatewayPassword:
 			return settings->GatewayPassword;
+
+		case FreeRDP_GatewayUrl:
+			return settings->GatewayUrl;
 
 		case FreeRDP_GatewayUsername:
 			return settings->GatewayUsername;
@@ -2940,6 +3055,9 @@ char* freerdp_settings_get_string_writable(rdpSettings* settings, size_t id)
 
 		case FreeRDP_KerberosStartTime:
 			return settings->KerberosStartTime;
+
+		case FreeRDP_KeyboardPipeName:
+			return settings->KeyboardPipeName;
 
 		case FreeRDP_KeyboardRemappingList:
 			return settings->KeyboardRemappingList;
@@ -3066,6 +3184,9 @@ char* freerdp_settings_get_string_writable(rdpSettings* settings, size_t id)
 
 		case FreeRDP_Username:
 			return settings->Username;
+
+		case FreeRDP_WinSCardModule:
+			return settings->WinSCardModule;
 
 		case FreeRDP_WindowTitle:
 			return settings->WindowTitle;
@@ -3141,6 +3262,9 @@ BOOL freerdp_settings_set_string_(rdpSettings* settings, size_t id, char* val, s
 		case FreeRDP_ClientProductId:
 			return update_string_(&settings->ClientProductId, cnv.c, len);
 
+		case FreeRDP_ClipboardUseSelection:
+			return update_string_(&settings->ClipboardUseSelection, cnv.c, len);
+
 		case FreeRDP_ComputerName:
 			return update_string_(&settings->ComputerName, cnv.c, len);
 
@@ -3177,14 +3301,41 @@ BOOL freerdp_settings_set_string_(rdpSettings* settings, size_t id, char* val, s
 		case FreeRDP_GatewayAccessToken:
 			return update_string_(&settings->GatewayAccessToken, cnv.c, len);
 
+		case FreeRDP_GatewayAvdAadtenantid:
+			return update_string_(&settings->GatewayAvdAadtenantid, cnv.c, len);
+
+		case FreeRDP_GatewayAvdActivityhint:
+			return update_string_(&settings->GatewayAvdActivityhint, cnv.c, len);
+
+		case FreeRDP_GatewayAvdArmpath:
+			return update_string_(&settings->GatewayAvdArmpath, cnv.c, len);
+
+		case FreeRDP_GatewayAvdDiagnosticserviceurl:
+			return update_string_(&settings->GatewayAvdDiagnosticserviceurl, cnv.c, len);
+
+		case FreeRDP_GatewayAvdGeo:
+			return update_string_(&settings->GatewayAvdGeo, cnv.c, len);
+
+		case FreeRDP_GatewayAvdHubdiscoverygeourl:
+			return update_string_(&settings->GatewayAvdHubdiscoverygeourl, cnv.c, len);
+
+		case FreeRDP_GatewayAvdWvdEndpointPool:
+			return update_string_(&settings->GatewayAvdWvdEndpointPool, cnv.c, len);
+
 		case FreeRDP_GatewayDomain:
 			return update_string_(&settings->GatewayDomain, cnv.c, len);
 
 		case FreeRDP_GatewayHostname:
 			return update_string_(&settings->GatewayHostname, cnv.c, len);
 
+		case FreeRDP_GatewayHttpExtAuthBearer:
+			return update_string_(&settings->GatewayHttpExtAuthBearer, cnv.c, len);
+
 		case FreeRDP_GatewayPassword:
 			return update_string_(&settings->GatewayPassword, cnv.c, len);
+
+		case FreeRDP_GatewayUrl:
+			return update_string_(&settings->GatewayUrl, cnv.c, len);
 
 		case FreeRDP_GatewayUsername:
 			return update_string_(&settings->GatewayUsername, cnv.c, len);
@@ -3218,6 +3369,9 @@ BOOL freerdp_settings_set_string_(rdpSettings* settings, size_t id, char* val, s
 
 		case FreeRDP_KerberosStartTime:
 			return update_string_(&settings->KerberosStartTime, cnv.c, len);
+
+		case FreeRDP_KeyboardPipeName:
+			return update_string_(&settings->KeyboardPipeName, cnv.c, len);
 
 		case FreeRDP_KeyboardRemappingList:
 			return update_string_(&settings->KeyboardRemappingList, cnv.c, len);
@@ -3345,6 +3499,9 @@ BOOL freerdp_settings_set_string_(rdpSettings* settings, size_t id, char* val, s
 		case FreeRDP_Username:
 			return update_string_(&settings->Username, cnv.c, len);
 
+		case FreeRDP_WinSCardModule:
+			return update_string_(&settings->WinSCardModule, cnv.c, len);
+
 		case FreeRDP_WindowTitle:
 			return update_string_(&settings->WindowTitle, cnv.c, len);
 
@@ -3435,6 +3592,9 @@ BOOL freerdp_settings_set_string_copy_(rdpSettings* settings, size_t id, const c
 		case FreeRDP_ClientProductId:
 			return update_string_copy_(&settings->ClientProductId, cnv.cc, len, cleanup);
 
+		case FreeRDP_ClipboardUseSelection:
+			return update_string_copy_(&settings->ClipboardUseSelection, cnv.cc, len, cleanup);
+
 		case FreeRDP_ComputerName:
 			return update_string_copy_(&settings->ComputerName, cnv.cc, len, cleanup);
 
@@ -3471,14 +3631,43 @@ BOOL freerdp_settings_set_string_copy_(rdpSettings* settings, size_t id, const c
 		case FreeRDP_GatewayAccessToken:
 			return update_string_copy_(&settings->GatewayAccessToken, cnv.cc, len, cleanup);
 
+		case FreeRDP_GatewayAvdAadtenantid:
+			return update_string_copy_(&settings->GatewayAvdAadtenantid, cnv.cc, len, cleanup);
+
+		case FreeRDP_GatewayAvdActivityhint:
+			return update_string_copy_(&settings->GatewayAvdActivityhint, cnv.cc, len, cleanup);
+
+		case FreeRDP_GatewayAvdArmpath:
+			return update_string_copy_(&settings->GatewayAvdArmpath, cnv.cc, len, cleanup);
+
+		case FreeRDP_GatewayAvdDiagnosticserviceurl:
+			return update_string_copy_(&settings->GatewayAvdDiagnosticserviceurl, cnv.cc, len,
+			                           cleanup);
+
+		case FreeRDP_GatewayAvdGeo:
+			return update_string_copy_(&settings->GatewayAvdGeo, cnv.cc, len, cleanup);
+
+		case FreeRDP_GatewayAvdHubdiscoverygeourl:
+			return update_string_copy_(&settings->GatewayAvdHubdiscoverygeourl, cnv.cc, len,
+			                           cleanup);
+
+		case FreeRDP_GatewayAvdWvdEndpointPool:
+			return update_string_copy_(&settings->GatewayAvdWvdEndpointPool, cnv.cc, len, cleanup);
+
 		case FreeRDP_GatewayDomain:
 			return update_string_copy_(&settings->GatewayDomain, cnv.cc, len, cleanup);
 
 		case FreeRDP_GatewayHostname:
 			return update_string_copy_(&settings->GatewayHostname, cnv.cc, len, cleanup);
 
+		case FreeRDP_GatewayHttpExtAuthBearer:
+			return update_string_copy_(&settings->GatewayHttpExtAuthBearer, cnv.cc, len, cleanup);
+
 		case FreeRDP_GatewayPassword:
 			return update_string_copy_(&settings->GatewayPassword, cnv.cc, len, cleanup);
+
+		case FreeRDP_GatewayUrl:
+			return update_string_copy_(&settings->GatewayUrl, cnv.cc, len, cleanup);
 
 		case FreeRDP_GatewayUsername:
 			return update_string_copy_(&settings->GatewayUsername, cnv.cc, len, cleanup);
@@ -3512,6 +3701,9 @@ BOOL freerdp_settings_set_string_copy_(rdpSettings* settings, size_t id, const c
 
 		case FreeRDP_KerberosStartTime:
 			return update_string_copy_(&settings->KerberosStartTime, cnv.cc, len, cleanup);
+
+		case FreeRDP_KeyboardPipeName:
+			return update_string_copy_(&settings->KeyboardPipeName, cnv.cc, len, cleanup);
 
 		case FreeRDP_KeyboardRemappingList:
 			return update_string_copy_(&settings->KeyboardRemappingList, cnv.cc, len, cleanup);
@@ -3640,6 +3832,9 @@ BOOL freerdp_settings_set_string_copy_(rdpSettings* settings, size_t id, const c
 
 		case FreeRDP_Username:
 			return update_string_copy_(&settings->Username, cnv.cc, len, cleanup);
+
+		case FreeRDP_WinSCardModule:
+			return update_string_copy_(&settings->WinSCardModule, cnv.cc, len, cleanup);
 
 		case FreeRDP_WindowTitle:
 			return update_string_copy_(&settings->WindowTitle, cnv.cc, len, cleanup);

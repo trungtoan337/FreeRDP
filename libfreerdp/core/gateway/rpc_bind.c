@@ -141,8 +141,8 @@ static int rpc_bind_setup(rdpRpc* rpc)
 			freerdp_set_last_error_log(instance->context, FREERDP_ERROR_CONNECT_CANCELLED);
 			return -1;
 		case AUTH_NO_CREDENTIALS:
-			freerdp_set_last_error_log(context, FREERDP_ERROR_CONNECT_NO_OR_MISSING_CREDENTIALS);
-			return 0;
+			WLog_INFO(TAG, "No credentials provided - using NULL identity");
+			break;
 		case AUTH_FAILED:
 		default:
 			return -1;
@@ -155,7 +155,8 @@ static int rpc_bind_setup(rdpRpc* rpc)
 	                                FreeRDP_GatewayDomain, FreeRDP_GatewayPassword))
 		return -1;
 
-	if (!credssp_auth_setup_client(rpc->auth, NULL, settings->GatewayHostname, &identity, NULL))
+	SEC_WINNT_AUTH_IDENTITY* identityArg = (settings->GatewayUsername ? &identity : NULL);
+	if (!credssp_auth_setup_client(rpc->auth, NULL, settings->GatewayHostname, identityArg, NULL))
 	{
 		sspi_FreeAuthIdentity(&identity);
 		return -1;
@@ -320,7 +321,7 @@ fail:
 BOOL rpc_recv_bind_ack_pdu(rdpRpc* rpc, wStream* s)
 {
 	BOOL rc = FALSE;
-	BYTE* auth_data;
+	const BYTE* auth_data;
 	size_t pos, end;
 	rpcconn_hdr_t header = { 0 };
 	SecBuffer buffer = { 0 };
@@ -343,7 +344,7 @@ BOOL rpc_recv_bind_ack_pdu(rdpRpc* rpc, wStream* s)
 	 * rts_read_pdu_header did already do consistency checks */
 	end = Stream_GetPosition(s);
 	Stream_SetPosition(s, pos + header.common.frag_length - header.common.auth_length);
-	auth_data = Stream_Pointer(s);
+	auth_data = Stream_ConstPointer(s);
 	Stream_SetPosition(s, end);
 
 	buffer.cbBuffer = header.common.auth_length;

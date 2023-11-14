@@ -39,6 +39,7 @@
 #include "../cliprdr_common.h"
 
 const char* type_FileGroupDescriptorW = "FileGroupDescriptorW";
+const char* type_FileContents = "FileContents";
 
 static const char* CB_MSG_TYPE_STRINGS(UINT32 type)
 {
@@ -192,11 +193,11 @@ static UINT cliprdr_process_general_capability(cliprdrPlugin* cliprdr, wStream* 
 
 	cliprdr_print_general_capability_flags(generalFlags);
 
-	cliprdr->useLongFormatNames = (generalFlags & CB_USE_LONG_FORMAT_NAMES);
-	cliprdr->streamFileClipEnabled = (generalFlags & CB_STREAM_FILECLIP_ENABLED);
-	cliprdr->fileClipNoFilePaths = (generalFlags & CB_FILECLIP_NO_FILE_PATHS);
-	cliprdr->canLockClipData = (generalFlags & CB_CAN_LOCK_CLIPDATA);
-	cliprdr->hasHugeFileSupport = (generalFlags & CB_HUGE_FILE_SUPPORT_ENABLED);
+	cliprdr->useLongFormatNames = (generalFlags & CB_USE_LONG_FORMAT_NAMES) ? TRUE : FALSE;
+	cliprdr->streamFileClipEnabled = (generalFlags & CB_STREAM_FILECLIP_ENABLED) ? TRUE : FALSE;
+	cliprdr->fileClipNoFilePaths = (generalFlags & CB_FILECLIP_NO_FILE_PATHS) ? TRUE : FALSE;
+	cliprdr->canLockClipData = (generalFlags & CB_CAN_LOCK_CLIPDATA) ? TRUE : FALSE;
+	cliprdr->hasHugeFileSupport = (generalFlags & CB_HUGE_FILE_SUPPORT_ENABLED) ? TRUE : FALSE;
 	cliprdr->capabilitiesReceived = TRUE;
 
 	capabilities.common.msgType = CB_CLIP_CAPS;
@@ -612,14 +613,17 @@ static UINT cliprdr_client_capabilities(CliprdrClientContext* context,
 	if (!cliprdr->hasHugeFileSupport)
 		flags &= ~CB_HUGE_FILE_SUPPORT_ENABLED;
 
-	cliprdr->useLongFormatNames = flags & CB_USE_LONG_FORMAT_NAMES;
-	cliprdr->streamFileClipEnabled = flags & CB_STREAM_FILECLIP_ENABLED;
-	cliprdr->fileClipNoFilePaths = flags & CB_FILECLIP_NO_FILE_PATHS;
-	cliprdr->canLockClipData = flags & CB_CAN_LOCK_CLIPDATA;
-	cliprdr->hasHugeFileSupport = flags & CB_HUGE_FILE_SUPPORT_ENABLED;
+	cliprdr->useLongFormatNames = (flags & CB_USE_LONG_FORMAT_NAMES) ? TRUE : FALSE;
+	cliprdr->streamFileClipEnabled = (flags & CB_STREAM_FILECLIP_ENABLED) ? TRUE : FALSE;
+	cliprdr->fileClipNoFilePaths = (flags & CB_FILECLIP_NO_FILE_PATHS) ? TRUE : FALSE;
+	cliprdr->canLockClipData = (flags & CB_CAN_LOCK_CLIPDATA) ? TRUE : FALSE;
+	cliprdr->hasHugeFileSupport = (flags & CB_HUGE_FILE_SUPPORT_ENABLED) ? TRUE : FALSE;
 
 	Stream_Write_UINT32(s, flags); /* generalFlags */
 	WLog_Print(cliprdr->log, WLOG_DEBUG, "ClientCapabilities");
+
+	cliprdr->initialFormatListSent = FALSE;
+
 	return cliprdr_packet_send(cliprdr, s);
 }
 
@@ -660,68 +664,6 @@ static UINT cliprdr_temp_directory(CliprdrClientContext* context,
 	return cliprdr_packet_send(cliprdr, s);
 }
 
-static CLIPRDR_FORMAT_LIST cliprdr_filter_local_format_list(const CLIPRDR_FORMAT_LIST* list,
-                                                            const UINT32 mask)
-{
-	const UINT32 all = CLIPRDR_FLAG_LOCAL_TO_REMOTE | CLIPRDR_FLAG_LOCAL_TO_REMOTE_FILES;
-	WINPR_ASSERT(list);
-
-	CLIPRDR_FORMAT_LIST filtered = { 0 };
-	filtered.common.msgType = CB_FORMAT_LIST;
-	filtered.numFormats = list->numFormats;
-	filtered.formats = calloc(filtered.numFormats, sizeof(CLIPRDR_FORMAT_LIST));
-
-	size_t wpos = 0;
-	if ((mask & all) == all)
-	{
-		for (size_t x = 0; x < list->numFormats; x++)
-		{
-			const CLIPRDR_FORMAT* format = &list->formats[x];
-			CLIPRDR_FORMAT* cur = &filtered.formats[x];
-			cur->formatId = format->formatId;
-			if (format->formatName)
-				cur->formatName = _strdup(format->formatName);
-			wpos++;
-		}
-	}
-	else if ((mask & CLIPRDR_FLAG_LOCAL_TO_REMOTE_FILES) != 0)
-	{
-		for (size_t x = 0; x < list->numFormats; x++)
-		{
-			const CLIPRDR_FORMAT* format = &list->formats[x];
-			CLIPRDR_FORMAT* cur = &filtered.formats[wpos];
-
-			if (!format->formatName)
-				continue;
-			if (strcmp(format->formatName, type_FileGroupDescriptorW) == 0)
-			{
-				cur->formatId = format->formatId;
-				cur->formatName = _strdup(format->formatName);
-				wpos++;
-				break;
-			}
-		}
-	}
-	else if ((mask & CLIPRDR_FLAG_LOCAL_TO_REMOTE) != 0)
-	{
-		for (size_t x = 0; x < list->numFormats; x++)
-		{
-			const CLIPRDR_FORMAT* format = &list->formats[x];
-			CLIPRDR_FORMAT* cur = &filtered.formats[wpos];
-
-			if (!format->formatName || (strcmp(format->formatName, type_FileGroupDescriptorW) != 0))
-			{
-				cur->formatId = format->formatId;
-				if (format->formatName)
-					cur->formatName = _strdup(format->formatName);
-				wpos++;
-			}
-		}
-	}
-	filtered.numFormats = wpos;
-	return filtered;
-}
-
 /**
  * Function description
  *
@@ -741,7 +683,8 @@ static UINT cliprdr_client_format_list(CliprdrClientContext* context,
 
 	const UINT32 mask =
 	    freerdp_settings_get_uint32(context->rdpcontext->settings, FreeRDP_ClipboardFeatureMask);
-	CLIPRDR_FORMAT_LIST filterList = cliprdr_filter_local_format_list(formatList, mask);
+	CLIPRDR_FORMAT_LIST filterList = cliprdr_filter_format_list(
+	    formatList, mask, CLIPRDR_FLAG_LOCAL_TO_REMOTE | CLIPRDR_FLAG_LOCAL_TO_REMOTE_FILES);
 
 	/* Allow initial format list from monitor ready, but ignore later attempts */
 	if ((filterList.numFormats == 0) && cliprdr->initialFormatListSent)
@@ -1177,7 +1120,8 @@ static VOID VCAPITYPE cliprdr_virtual_channel_init_event_ex(LPVOID lpUserParam, 
 /* cliprdr is always built-in */
 #define VirtualChannelEntryEx cliprdr_VirtualChannelEntryEx
 
-BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS pEntryPoints, PVOID pInitHandle)
+FREERDP_ENTRY_POINT(BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS pEntryPoints,
+                                                         PVOID pInitHandle))
 {
 	UINT rc;
 	cliprdrPlugin* cliprdr;

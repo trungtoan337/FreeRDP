@@ -30,6 +30,7 @@
 #include <winpr/crt.h>
 #include <winpr/print.h>
 #include <winpr/stream.h>
+#include <winpr/library.h>
 #include <winpr/smartcard.h>
 
 #include <freerdp/freerdp.h>
@@ -47,21 +48,31 @@
 #include <freerdp/emulate/scard/smartcard_emulate.h>
 
 #define str(x) #x
-#define wrap(ctx, fkt, ...) Emulate_##fkt(ctx->emulation, ##__VA_ARGS__)
+#define wrap(ctx, fkt, ...)                                             \
+	ctx->useEmulatedCard ? Emulate_##fkt(ctx->emulation, ##__VA_ARGS__) \
+	                     : ctx->pWinSCardApi->pfn##fkt(__VA_ARGS__)
+#define wrap_ptr(ctx, fkt, ...) wrap(ctx, fkt, ##__VA_ARGS__)
 #else
-#define wrap(ctx, fkt, ...) fkt(__VA_ARGS__)
+#define wrap(ctx, fkt, ...) \
+	ctx->useEmulatedCard ? SCARD_F_INTERNAL_ERROR : ctx->pWinSCardApi->pfn##fkt(__VA_ARGS__)
+#define wrap_ptr(ctx, fkt, ...) \
+	ctx->useEmulatedCard ? NULL : ctx->pWinSCardApi->pfn##fkt(__VA_ARGS__)
 #endif
 
 #define SCARD_MAX_TIMEOUT 60000
 
 struct s_scard_call_context
 {
+	BOOL useEmulatedCard;
 	HANDLE StartedEvent;
 	wLinkedList* names;
 	wHashTable* rgSCardContextList;
 #if defined(WITH_SMARTCARD_EMULATE)
 	SmartcardEmulationContext* emulation;
 #endif
+	HANDLE hWinSCardLibrary;
+	SCardApiFunctionTable WinSCardApi;
+	const SCardApiFunctionTable* pWinSCardApi;
 	HANDLE stopEvent;
 	void* userdata;
 
@@ -1438,7 +1449,7 @@ static LONG smartcard_AccessStartedEvent_Call(scard_call_context* smartcard, wSt
 	WINPR_UNUSED(operation);
 
 	if (!smartcard->StartedEvent)
-		smartcard->StartedEvent = wrap(smartcard, SCardAccessStartedEvent);
+		smartcard->StartedEvent = wrap_ptr(smartcard, SCardAccessStartedEvent);
 
 	if (!smartcard->StartedEvent)
 		status = SCARD_E_NO_SERVICE;
@@ -1839,10 +1850,47 @@ scard_call_context* smartcard_call_context_new(const rdpSettings* settings)
 		goto fail;
 
 #if defined(WITH_SMARTCARD_EMULATE)
-	ctx->emulation = Emulate_New(settings);
-	if (!ctx->emulation)
+	ctx->useEmulatedCard = settings->SmartcardEmulation;
+#endif
+
+	if (ctx->useEmulatedCard)
+	{
+#if defined(WITH_SMARTCARD_EMULATE)
+		ctx->emulation = Emulate_New(settings);
+		if (!ctx->emulation)
+			goto fail;
+#else
+		WLog_ERR(TAG, "Smartcard emulation requested, but not supported!");
 		goto fail;
 #endif
+	}
+	else
+	{
+		if (settings->WinSCardModule)
+		{
+			ctx->hWinSCardLibrary = LoadLibraryX(settings->WinSCardModule);
+
+			if (!ctx->hWinSCardLibrary)
+			{
+				WLog_ERR(TAG, "Failed to load WinSCard library: '%s'", settings->WinSCardModule);
+				goto fail;
+			}
+
+			if (!WinSCard_LoadApiTableFunctions(&ctx->WinSCardApi, ctx->hWinSCardLibrary))
+				goto fail;
+			ctx->pWinSCardApi = &ctx->WinSCardApi;
+		}
+		else
+		{
+			ctx->pWinSCardApi = WinPR_GetSCardApiFunctionTable();
+		}
+
+		if (!ctx->pWinSCardApi)
+		{
+			WLog_ERR(TAG, "Failed to load WinSCard API!");
+			goto fail;
+		}
+	}
 
 	ctx->rgSCardContextList = HashTable_New(FALSE);
 	if (!ctx->rgSCardContextList)
@@ -1870,9 +1918,27 @@ void smartcard_call_context_free(scard_call_context* ctx)
 	{
 		wrap(ctx, SCardReleaseStartedEvent);
 	}
-#if defined(WITH_SMARTCARD_EMULATE)
-	Emulate_Free(ctx->emulation);
+
+	if (ctx->useEmulatedCard)
+	{
+#ifdef WITH_SMARTCARD_EMULATE
+		if (ctx->emulation)
+		{
+			Emulate_Free(ctx->emulation);
+			ctx->emulation = NULL;
+		}
 #endif
+	}
+
+	if (ctx->hWinSCardLibrary)
+	{
+		ZeroMemory(&ctx->WinSCardApi, sizeof(SCardApiFunctionTable));
+		FreeLibrary(ctx->hWinSCardLibrary);
+		ctx->hWinSCardLibrary = NULL;
+	}
+
+	ctx->pWinSCardApi = NULL;
+
 	HashTable_Free(ctx->rgSCardContextList);
 	CloseHandle(ctx->stopEvent);
 	free(ctx);
@@ -1936,10 +2002,11 @@ BOOL smartcard_call_is_configured(scard_call_context* ctx)
 	WINPR_ASSERT(ctx);
 
 #if defined(WITH_SMARTCARD_EMULATE)
-	return Emulate_IsConfigured(ctx->emulation);
-#else
-	return FALSE;
+	if (ctx->useEmulatedCard)
+		return Emulate_IsConfigured(ctx->emulation);
 #endif
+
+	return FALSE;
 }
 
 BOOL smartcard_call_context_signal_stop(scard_call_context* ctx, BOOL reset)

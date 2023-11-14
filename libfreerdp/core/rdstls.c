@@ -362,7 +362,7 @@ static BOOL rdstls_read_data(wLog* log, wStream* s, UINT16* pLength, const BYTE*
 		return TRUE;
 	}
 
-	*pData = Stream_Pointer(s);
+	*pData = Stream_ConstPointer(s);
 	*pLength = length;
 	return Stream_SafeSeek(s, length);
 }
@@ -639,7 +639,7 @@ static int rdstls_recv(rdpTransport* transport, wStream* s, void* extra)
 }
 
 #define rdstls_check_state_requirements(rdstls, expected) \
-	rdstls_check_state_requirements_((rdstls), (expected), __FILE__, __FUNCTION__, __LINE__)
+	rdstls_check_state_requirements_((rdstls), (expected), __FILE__, __func__, __LINE__)
 static BOOL rdstls_check_state_requirements_(rdpRdstls* rdstls, RDSTLS_STATE expected,
                                              const char* file, const char* fkt, size_t line)
 {

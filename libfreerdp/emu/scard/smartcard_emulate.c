@@ -188,6 +188,18 @@ static BOOL wchar_compare(const void* a, const void* b)
 	return _wcscmp(wa, wb) == 0;
 }
 
+static void* str_copy(const void* ptr)
+{
+	const char* src = ptr;
+	return _strdup(src);
+}
+
+static void* wstr_copy(const void* ptr)
+{
+	const WCHAR* src = ptr;
+	return _wcsdup(src);
+}
+
 static SCardContext* scard_context_new(void)
 {
 	SCardContext* ctx = calloc(1, sizeof(SCardContext));
@@ -215,7 +227,7 @@ static SCardContext* scard_context_new(void)
 		WINPR_ASSERT(val);
 
 		key->fnObjectEquals = char_compare;
-		key->fnObjectNew = (OBJECT_NEW_FN)_strdup;
+		key->fnObjectNew = str_copy;
 		key->fnObjectFree = free;
 
 		val->fnObjectFree = free;
@@ -232,7 +244,7 @@ static SCardContext* scard_context_new(void)
 		WINPR_ASSERT(val);
 
 		key->fnObjectEquals = wchar_compare;
-		key->fnObjectNew = (OBJECT_NEW_FN)_wcsdup;
+		key->fnObjectNew = wstr_copy;
 		key->fnObjectFree = free;
 
 		val->fnObjectFree = free;
@@ -400,7 +412,7 @@ LONG WINAPI Emulate_SCardEstablishContext(SmartcardEmulationContext* smartcard, 
 	{
 		SCARDCONTEXT context = { 0 };
 
-		winpr_RAND((BYTE*)&context, sizeof(SCARDCONTEXT));
+		winpr_RAND(&context, sizeof(SCARDCONTEXT));
 		if (HashTable_Insert(smartcard->contexts, (const void*)context, ctx))
 		{
 			*phContext = context;
@@ -1219,7 +1231,7 @@ HANDLE WINAPI Emulate_SCardAccessStartedEvent(SmartcardEmulationContext* smartca
 	WLog_Print(smartcard->log, smartcard->log_default_level, "SCardAccessStartedEvent {");
 
 	/* Not required, return random */
-	winpr_RAND((BYTE*)&hEvent, sizeof(hEvent));
+	winpr_RAND(&hEvent, sizeof(hEvent));
 
 	WLog_Print(smartcard->log, smartcard->log_default_level, "SCardAccessStartedEvent } hEvent: %p",
 	           hEvent);
@@ -1551,7 +1563,7 @@ static SCardHandle* reader2handle(SmartcardEmulationContext* smartcard, SCARDCON
 	hdl = scard_handle_new(smartcard, hContext, szReader, unicode);
 	if (hdl)
 	{
-		winpr_RAND((BYTE*)&hdl->card, sizeof(hdl->card));
+		winpr_RAND(&hdl->card, sizeof(hdl->card));
 		hdl->dwActiveProtocol = SCARD_PROTOCOL_T1;
 		hdl->dwShareMode = dwShareMode;
 
@@ -2252,7 +2264,7 @@ LONG WINAPI Emulate_SCardReadCacheW(SmartcardEmulationContext* smartcard, SCARDC
 	return status;
 }
 
-static BOOL insert_data(wHashTable* table, DWORD FreshnessCounter, const void* key,
+static LONG insert_data(wHashTable* table, DWORD FreshnessCounter, const void* key,
                         const PBYTE Data, DWORD DataLen)
 {
 	BOOL rc;

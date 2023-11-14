@@ -53,6 +53,11 @@
 #include "proxy.h"
 #include "utils.h"
 #include "state.h"
+#include "childsession.h"
+
+#include "gateway/rdg.h"
+#include "gateway/wst.h"
+#include "gateway/arm.h"
 
 #define TAG FREERDP_TAG("core.transport")
 
@@ -64,6 +69,7 @@ struct rdp_transport
 	BIO* frontBio;
 	rdpRdg* rdg;
 	rdpTsg* tsg;
+	rdpWst* wst;
 	rdpTls* tls;
 	rdpContext* context;
 	rdpNla* nla;
@@ -86,6 +92,7 @@ struct rdp_transport
 	rdpTransportIo io;
 	HANDLE ioEvent;
 	BOOL useIoEvent;
+	BOOL earlyUserAuth;
 };
 
 static void transport_ssl_cb(SSL* ssl, int where, int ret)
@@ -114,7 +121,9 @@ static void transport_ssl_cb(SSL* ssl, int where, int ret)
 				{
 					if (!freerdp_get_last_error(transport_get_context(transport)))
 					{
-						UINT32 kret = nla_get_error(transport->nla);
+						UINT32 kret = 0;
+						if (transport->nla)
+							kret = nla_get_error(transport->nla);
 						if (kret == 0)
 							kret = FREERDP_ERROR_CONNECT_PASSWORD_CERTAINLY_EXPIRED;
 						freerdp_set_last_error_log(transport_get_context(transport), kret);
@@ -240,7 +249,7 @@ BOOL transport_connect_tls(rdpTransport* transport)
 	/* Only prompt for password if we use TLS (NLA also calls this function) */
 	if (settings->SelectedProtocol == PROTOCOL_SSL)
 	{
-		switch (utils_authenticate(transport_get_context(transport)->instance, AUTH_TLS, FALSE))
+		switch (utils_authenticate(context->instance, AUTH_TLS, FALSE))
 		{
 			case AUTH_SKIP:
 			case AUTH_SUCCESS:
@@ -283,6 +292,7 @@ static BOOL transport_default_connect_tls(rdpTransport* transport)
 		transport->layer = TRANSPORT_LAYER_TLS;
 
 	tls->hostname = settings->ServerHostname;
+	tls->serverName = settings->UserSpecifiedServerName;
 	tls->port = settings->ServerPort;
 
 	if (tls->port == 0)
@@ -318,7 +328,7 @@ static BOOL transport_default_connect_tls(rdpTransport* transport)
 	return TRUE;
 }
 
-BOOL transport_connect_nla(rdpTransport* transport)
+BOOL transport_connect_nla(rdpTransport* transport, BOOL earlyUserAuth)
 {
 	rdpContext* context = NULL;
 	rdpSettings* settings = NULL;
@@ -346,6 +356,8 @@ BOOL transport_connect_nla(rdpTransport* transport)
 
 	if (!rdp->nla)
 		return FALSE;
+
+	nla_set_early_user_auth(rdp->nla, earlyUserAuth);
 
 	transport_set_nla_mode(transport, TRUE);
 
@@ -462,8 +474,33 @@ BOOL transport_connect(rdpTransport* transport, const char* hostname, UINT16 por
 
 	if (transport->GatewayEnabled)
 	{
+		if (settings->GatewayUrl)
+		{
+			WINPR_ASSERT(!transport->wst);
+			transport->wst = wst_new(context);
+
+			if (!transport->wst)
+				return FALSE;
+
+			status = wst_connect(transport->wst, timeout);
+
+			if (status)
+			{
+				transport->frontBio = wst_get_front_bio_and_take_ownership(transport->wst);
+				WINPR_ASSERT(transport->frontBio);
+				BIO_set_nonblock(transport->frontBio, 0);
+				transport->layer = TRANSPORT_LAYER_TSG;
+				status = TRUE;
+			}
+			else
+			{
+				wst_free(transport->wst);
+				transport->wst = NULL;
+			}
+		}
 		if (!status && settings->GatewayHttpTransport)
 		{
+			WINPR_ASSERT(!transport->rdg);
 			transport->rdg = rdg_new(context);
 
 			if (!transport->rdg)
@@ -488,6 +525,7 @@ BOOL transport_connect(rdpTransport* transport, const char* hostname, UINT16 por
 
 		if (!status && settings->GatewayRpcTransport && rpcFallback)
 		{
+			WINPR_ASSERT(!transport->tsg);
 			transport->tsg = tsg_new(transport);
 
 			if (!transport->tsg)
@@ -539,6 +577,18 @@ BOOL transport_connect(rdpTransport* transport, const char* hostname, UINT16 por
 	}
 
 	return status;
+}
+
+BOOL transport_connect_childsession(rdpTransport* transport)
+{
+	WINPR_ASSERT(transport);
+
+	transport->frontBio = createChildSessionBio();
+	if (!transport->frontBio)
+		return FALSE;
+
+	transport->layer = TRANSPORT_LAYER_TSG;
+	return TRUE;
 }
 
 BOOL transport_accept_rdp(rdpTransport* transport)
@@ -656,7 +706,7 @@ fail:
 }
 
 #define WLog_ERR_BIO(transport, biofunc, bio) \
-	transport_bio_error_log(transport, biofunc, bio, __FILE__, __FUNCTION__, __LINE__)
+	transport_bio_error_log(transport, biofunc, bio, __FILE__, __func__, __LINE__)
 
 static void transport_bio_error_log(rdpTransport* transport, LPCSTR biofunc, BIO* bio, LPCSTR file,
                                     LPCSTR func, DWORD line)
@@ -997,6 +1047,14 @@ static int transport_default_read_pdu(rdpTransport* transport, wStream* s)
 			Stream_Write_UINT8(s, c);
 		} while (c != '\0');
 	}
+	else if (transport->earlyUserAuth)
+	{
+		if (!Stream_EnsureCapacity(s, 4))
+			return -1;
+		const int rc = transport_read_layer_bytes(transport, s, 4);
+		if (rc != 1)
+			return rc;
+	}
 	else
 	{
 		/* Read in pdu length */
@@ -1085,7 +1143,7 @@ static int transport_default_write(rdpTransport* transport, wStream* s)
 	while (length > 0)
 	{
 		ERR_clear_error();
-		status = BIO_write(transport->frontBio, Stream_Pointer(s), length);
+		status = BIO_write(transport->frontBio, Stream_ConstPointer(s), length);
 
 		if (status <= 0)
 		{
@@ -1223,6 +1281,16 @@ DWORD transport_get_event_handles(rdpTransport* transport, HANDLE* events, DWORD
 		{
 			const DWORD tmp =
 			    tsg_get_event_handles(transport->tsg, &events[nCount], count - nCount);
+
+			if (tmp == 0)
+				return 0;
+
+			nCount += tmp;
+		}
+		else if (transport->wst)
+		{
+			const DWORD tmp =
+			    wst_get_event_handles(transport->wst, &events[nCount], count - nCount);
 
 			if (tmp == 0)
 				return 0;
@@ -1430,8 +1498,15 @@ static BOOL transport_default_disconnect(rdpTransport* transport)
 		transport->rdg = NULL;
 	}
 
+	if (transport->wst)
+	{
+		wst_free(transport->wst);
+		transport->wst = NULL;
+	}
+
 	transport->frontBio = NULL;
 	transport->layer = TRANSPORT_LAYER_TCP;
+	transport->earlyUserAuth = FALSE;
 	return status;
 }
 
@@ -1681,4 +1756,11 @@ BOOL transport_io_callback_set_event(rdpTransport* transport, BOOL set)
 	if (!set)
 		return ResetEvent(transport->ioEvent);
 	return SetEvent(transport->ioEvent);
+}
+
+void transport_set_early_user_auth_mode(rdpTransport* transport, BOOL EUAMode)
+{
+	WINPR_ASSERT(transport);
+	transport->earlyUserAuth = EUAMode;
+	WLog_Print(transport->log, WLOG_DEBUG, "Early User Auth Mode: %s", EUAMode ? "on" : "off");
 }

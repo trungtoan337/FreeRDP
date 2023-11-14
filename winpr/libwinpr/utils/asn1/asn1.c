@@ -303,27 +303,28 @@ static void asn1WriteLen(wStream* s, size_t len)
 {
 	if (len < 128)
 	{
-		Stream_Write_UINT8(s, len);
+		Stream_Write_UINT8(s, (UINT8)len);
 	}
 	else if (len < (1 << 8))
 	{
 		Stream_Write_UINT8(s, 0x81);
-		Stream_Write_UINT8(s, len);
+		Stream_Write_UINT8(s, (UINT8)len);
 	}
 	else if (len < (1 << 16))
 	{
 		Stream_Write_UINT8(s, 0x82);
-		Stream_Write_UINT16_BE(s, len);
+		Stream_Write_UINT16_BE(s, (UINT16)len);
 	}
 	else if (len < (1 << 24))
 	{
 		Stream_Write_UINT8(s, 0x83);
-		Stream_Write_UINT24_BE(s, len);
+		Stream_Write_UINT24_BE(s, (UINT32)len);
 	}
 	else
 	{
+		WINPR_ASSERT(len <= UINT32_MAX);
 		Stream_Write_UINT8(s, 0x84);
-		Stream_Write_UINT32_BE(s, len);
+		Stream_Write_UINT32_BE(s, (UINT32)len);
 	}
 }
 
@@ -1182,7 +1183,7 @@ size_t WinPrAsn1DecReadUtcTime(WinPrAsn1Decoder* dec, WinPrAsn1_UTCTIME* target)
 	if (!Stream_CheckAndLogRequiredLength(TAG, &dec->source, len) || len < 12)
 		return 0;
 
-	Stream_StaticConstInit(s, Stream_Pointer(&dec->source), len);
+	Stream_StaticConstInit(s, Stream_ConstPointer(&dec->source), len);
 
 	v = read2digits(s);
 	if (v <= 0)
@@ -1251,7 +1252,7 @@ static size_t readConstructed(WinPrAsn1Decoder* dec, wStream* s, WinPrAsn1_tag* 
 		return 0;
 
 	target->encoding = dec->encoding;
-	Stream_StaticConstInit(&target->source, Stream_Pointer(s), len);
+	Stream_StaticConstInit(&target->source, Stream_ConstPointer(s), len);
 	Stream_Seek(s, len);
 	return ret + len;
 }
@@ -1335,7 +1336,7 @@ size_t WinPrAsn1DecPeekContextualTag(WinPrAsn1Decoder* dec, WinPrAsn1_tagId* tag
 	wStream staticS;
 	WINPR_ASSERT(dec);
 
-	Stream_StaticConstInit(&staticS, Stream_Pointer(&dec->source),
+	Stream_StaticConstInit(&staticS, Stream_ConstPointer(&dec->source),
 	                       Stream_GetRemainingLength(&dec->source));
 	return readContextualTag(dec, &staticS, tagId, ctxtDec);
 }
@@ -1476,7 +1477,7 @@ wStream WinPrAsn1DecGetStream(WinPrAsn1Decoder* dec)
 	wStream s = { 0 };
 	WINPR_ASSERT(dec);
 
-	Stream_StaticConstInit(&s, Stream_Pointer(&dec->source),
+	Stream_StaticConstInit(&s, Stream_ConstPointer(&dec->source),
 	                       Stream_GetRemainingLength(&dec->source));
 	return s;
 }

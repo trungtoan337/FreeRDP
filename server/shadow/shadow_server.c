@@ -214,6 +214,15 @@ int shadow_server_parse_command_line(rdpShadowServer* server, int argc, char** a
 		{
 			server->mayInteract = arg->Value ? TRUE : FALSE;
 		}
+		CommandLineSwitchCase(arg, "max-connections")
+		{
+			errno = 0;
+			unsigned long val = strtoul(arg->Value, NULL, 0);
+
+			if ((errno != 0) || (val > UINT32_MAX))
+				return -1;
+			server->maxClientsConnected = val;
+		}
 		CommandLineSwitchCase(arg, "rect")
 		{
 			char* p;
@@ -450,6 +459,14 @@ int shadow_server_parse_command_line(rdpShadowServer* server, int argc, char** a
 		}
 	}
 
+	/* If we want to disable authentication we need to ensure that NLA security
+	 * is not activated. Only TLS and RDP security allow anonymous login.
+	 */
+	if (!server->authentication)
+	{
+		if (!freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, FALSE))
+			return COMMAND_LINE_ERROR;
+	}
 	return status;
 }
 
@@ -851,6 +868,26 @@ out_fail:
 	return ret;
 }
 
+static BOOL shadow_server_check_peer_restrictions(freerdp_listener* listener)
+{
+	WINPR_ASSERT(listener);
+
+	rdpShadowServer* server = (rdpShadowServer*)listener->info;
+	WINPR_ASSERT(server);
+
+	if (server->maxClientsConnected > 0)
+	{
+		const size_t count = ArrayList_Count(server->clients);
+		if (count >= server->maxClientsConnected)
+		{
+			WLog_WARN(TAG, "connection limit [%" PRIuz "] reached, discarding client",
+			          server->maxClientsConnected);
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
 int shadow_server_init(rdpShadowServer* server)
 {
 	int status;
@@ -880,6 +917,7 @@ int shadow_server_init(rdpShadowServer* server)
 		goto fail;
 
 	server->listener->info = (void*)server;
+	server->listener->CheckPeerAcceptRestrictions = shadow_server_check_peer_restrictions;
 	server->listener->PeerAccepted = shadow_client_accepted;
 	server->subsystem = shadow_subsystem_new();
 
@@ -938,7 +976,7 @@ rdpShadowServer* shadow_server_new(void)
 	server->h264BitRate = 10000000;
 	server->h264FrameRate = 30;
 	server->h264QP = 0;
-	server->authentication = FALSE;
+	server->authentication = TRUE;
 	server->settings = freerdp_settings_new(FREERDP_SETTINGS_SERVER_MODE);
 	return server;
 }

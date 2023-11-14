@@ -33,7 +33,7 @@
 /* rfx_decode_YCbCr_to_RGB_NEON code now resides in the primitives library. */
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-rfx_quantization_decode_block_NEON(INT16* buffer, const int buffer_size, const UINT32 factor)
+rfx_quantization_decode_block_NEON(INT16* buffer, const size_t buffer_size, const UINT32 factor)
 {
 	int16x8_t quantFactors = vdupq_n_s16(factor);
 	int16x8_t* buf = (int16x8_t*)buffer;
@@ -48,8 +48,11 @@ rfx_quantization_decode_block_NEON(INT16* buffer, const int buffer_size, const U
 	} while (buf < buf_end);
 }
 
-static void rfx_quantization_decode_NEON(INT16* buffer, const UINT32* quantVals)
+static void rfx_quantization_decode_NEON(INT16* buffer, const UINT32* WINPR_RESTRICT quantVals)
 {
+	WINPR_ASSERT(buffer);
+	WINPR_ASSERT(quantVals);
+
 	rfx_quantization_decode_block_NEON(&buffer[0], 1024, quantVals[8] - 1);    /* HL1 */
 	rfx_quantization_decode_block_NEON(&buffer[1024], 1024, quantVals[7] - 1); /* LH1 */
 	rfx_quantization_decode_block_NEON(&buffer[2048], 1024, quantVals[9] - 1); /* HH1 */
@@ -63,17 +66,17 @@ static void rfx_quantization_decode_NEON(INT16* buffer, const UINT32* quantVals)
 }
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-rfx_dwt_2d_decode_block_horiz_NEON(INT16* l, INT16* h, INT16* dst, int subband_width)
+rfx_dwt_2d_decode_block_horiz_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRICT h,
+                                   INT16* WINPR_RESTRICT dst, size_t subband_width)
 {
-	int y, n;
 	INT16* l_ptr = l;
 	INT16* h_ptr = h;
 	INT16* dst_ptr = dst;
 
-	for (y = 0; y < subband_width; y++)
+	for (size_t y = 0; y < subband_width; y++)
 	{
 		/* Even coefficients */
-		for (n = 0; n < subband_width; n += 8)
+		for (size_t n = 0; n < subband_width; n += 8)
 		{
 			// dst[2n] = l[n] - ((h[n-1] + h[n] + 1) >> 1);
 			int16x8_t l_n = vld1q_s16(l_ptr);
@@ -99,7 +102,7 @@ rfx_dwt_2d_decode_block_horiz_NEON(INT16* l, INT16* h, INT16* dst, int subband_w
 		h_ptr -= subband_width;
 
 		/* Odd coefficients */
-		for (n = 0; n < subband_width; n += 8)
+		for (size_t n = 0; n < subband_width; n += 8)
 		{
 			// dst[2n + 1] = (h[n] << 1) + ((dst[2n] + dst[2n + 2]) >> 1);
 			int16x8_t h_n = vld1q_s16(h_ptr);
@@ -126,18 +129,18 @@ rfx_dwt_2d_decode_block_horiz_NEON(INT16* l, INT16* h, INT16* dst, int subband_w
 }
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-rfx_dwt_2d_decode_block_vert_NEON(INT16* l, INT16* h, INT16* dst, int subband_width)
+rfx_dwt_2d_decode_block_vert_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRICT h,
+                                  INT16* WINPR_RESTRICT dst, size_t subband_width)
 {
-	int x, n;
 	INT16* l_ptr = l;
 	INT16* h_ptr = h;
 	INT16* dst_ptr = dst;
-	int total_width = subband_width + subband_width;
+	const size_t total_width = subband_width + subband_width;
 
 	/* Even coefficients */
-	for (n = 0; n < subband_width; n++)
+	for (size_t n = 0; n < subband_width; n++)
 	{
-		for (x = 0; x < total_width; x += 8)
+		for (size_t x = 0; x < total_width; x += 8)
 		{
 			// dst[2n] = l[n] - ((h[n-1] + h[n] + 1) >> 1);
 			int16x8_t l_n = vld1q_s16(l_ptr);
@@ -167,9 +170,9 @@ rfx_dwt_2d_decode_block_vert_NEON(INT16* l, INT16* h, INT16* dst, int subband_wi
 	dst_ptr = dst + total_width;
 
 	/* Odd coefficients */
-	for (n = 0; n < subband_width; n++)
+	for (size_t n = 0; n < subband_width; n++)
 	{
-		for (x = 0; x < total_width; x += 8)
+		for (size_t x = 0; x < total_width; x += 8)
 		{
 			// dst[2n + 1] = (h[n] << 1) + ((dst[2n] + dst[2n + 2]) >> 1);
 			int16x8_t h_n = vld1q_s16(h_ptr);
@@ -197,7 +200,8 @@ rfx_dwt_2d_decode_block_vert_NEON(INT16* l, INT16* h, INT16* dst, int subband_wi
 }
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-rfx_dwt_2d_decode_block_NEON(INT16* buffer, INT16* idwt, int subband_width)
+rfx_dwt_2d_decode_block_NEON(INT16* WINPR_RESTRICT buffer, INT16* WINPR_RESTRICT idwt,
+                             size_t subband_width)
 {
 	INT16 *hl, *lh, *hh, *ll;
 	INT16 *l_dst, *h_dst;
@@ -225,6 +229,294 @@ static void rfx_dwt_2d_decode_NEON(INT16* buffer, INT16* dwt_buffer)
 	rfx_dwt_2d_decode_block_NEON(buffer, dwt_buffer, 32);
 }
 
+static INLINE void rfx_idwt_extrapolate_horiz_neon(INT16* restrict pLowBand, size_t nLowStep,
+                                                   const INT16* restrict pHighBand,
+                                                   size_t nHighStep, INT16* restrict pDstBand,
+                                                   size_t nDstStep, size_t nLowCount,
+                                                   size_t nHighCount, size_t nDstCount)
+{
+	WINPR_ASSERT(pLowBand);
+	WINPR_ASSERT(pHighBand);
+	WINPR_ASSERT(pDstBand);
+
+	size_t n;
+	INT16* l_ptr = pLowBand;
+	const INT16* h_ptr = pHighBand;
+	INT16* dst_ptr = pDstBand;
+	size_t batchSize = (nLowCount + nHighCount) >> 1;
+
+	for (size_t y = 0; y < nDstCount; y++)
+	{
+		/* Even coefficients */
+		for (n = 0; n < batchSize; n += 8)
+		{
+			// dst[2n] = l[n] - ((h[n-1] + h[n] + 1) >> 1);
+			int16x8_t l_n = vld1q_s16(l_ptr);
+			int16x8_t h_n = vld1q_s16(h_ptr);
+			int16x8_t h_n_m = vld1q_s16(h_ptr - 1);
+
+			if (n == 0)
+			{
+				int16_t first = vgetq_lane_s16(h_n_m, 1);
+				h_n_m = vsetq_lane_s16(first, h_n_m, 0);
+			}
+			else if (n == 24)
+				h_n = vsetq_lane_s16(0, h_n, 7);
+
+			int16x8_t tmp_n = vaddq_s16(h_n, h_n_m);
+			tmp_n = vaddq_s16(tmp_n, vdupq_n_s16(1));
+			tmp_n = vshrq_n_s16(tmp_n, 1);
+			int16x8_t dst_n = vsubq_s16(l_n, tmp_n);
+			vst1q_s16(l_ptr, dst_n);
+			l_ptr += 8;
+			h_ptr += 8;
+		}
+		if (n < 32)
+			*l_ptr -= *(h_ptr - 1);
+
+		l_ptr -= batchSize;
+		h_ptr -= batchSize;
+
+		/* Odd coefficients */
+		for (n = 0; n < batchSize; n += 8)
+		{
+			// dst[2n + 1] = (h[n] << 1) + ((dst[2n] + dst[2n + 2]) >> 1);
+			int16x8_t h_n = vld1q_s16(h_ptr);
+			h_n = vshlq_n_s16(h_n, 1);
+			int16x8x2_t dst_n;
+			dst_n.val[0] = vld1q_s16(l_ptr);
+			int16x8_t dst_n_p = vld1q_s16(l_ptr + 1);
+
+			if (n == 24)
+				h_n = vsetq_lane_s16(0, h_n, 7);
+
+			dst_n.val[1] = vaddq_s16(dst_n_p, dst_n.val[0]);
+			dst_n.val[1] = vshrq_n_s16(dst_n.val[1], 1);
+			dst_n.val[1] = vaddq_s16(dst_n.val[1], h_n);
+			vst2q_s16(dst_ptr, dst_n);
+			l_ptr += 8;
+			h_ptr += 8;
+			dst_ptr += 16;
+		}
+		if (n == 32)
+		{
+			h_ptr -= 1;
+			l_ptr += 1;
+		}
+		else
+		{
+			*dst_ptr = *l_ptr;
+			l_ptr += 1;
+			dst_ptr += 1;
+		}
+	}
+}
+
+static INLINE void rfx_idwt_extrapolate_vert_neon(const INT16* restrict pLowBand, size_t nLowStep,
+                                                  const INT16* restrict pHighBand, size_t nHighStep,
+                                                  INT16* restrict pDstBand, size_t nDstStep,
+                                                  size_t nLowCount, size_t nHighCount,
+                                                  size_t nDstCount)
+{
+	WINPR_ASSERT(pLowBand);
+	WINPR_ASSERT(pHighBand);
+	WINPR_ASSERT(pDstBand);
+
+	const INT16* l_ptr = pLowBand;
+	const INT16* h_ptr = pHighBand;
+	INT16* dst_ptr = pDstBand;
+	size_t batchSize = (nDstCount >> 3) << 3;
+	size_t forceBandSize = (nLowCount + nHighCount) >> 1;
+
+	/* Even coefficients */
+	for (size_t n = 0; n < forceBandSize; n++)
+	{
+		for (size_t x = 0; x < batchSize; x += 8)
+		{
+			// dst[2n] = l[n] - ((h[n-1] + h[n] + 1) >> 1);
+			int16x8_t l_n = vld1q_s16(l_ptr);
+			int16x8_t h_n = vld1q_s16((n == 31) ? (h_ptr - nHighStep) : h_ptr);
+			int16x8_t tmp_n = vaddq_s16(h_n, vdupq_n_s16(1));
+
+			if (n == 0)
+				tmp_n = vaddq_s16(tmp_n, h_n);
+			else if (n < 31)
+			{
+				int16x8_t h_n_m = vld1q_s16((h_ptr - nHighStep));
+				tmp_n = vaddq_s16(tmp_n, h_n_m);
+			}
+
+			tmp_n = vshrq_n_s16(tmp_n, 1);
+			int16x8_t dst_n = vsubq_s16(l_n, tmp_n);
+			vst1q_s16(dst_ptr, dst_n);
+			l_ptr += 8;
+			h_ptr += 8;
+			dst_ptr += 8;
+		}
+
+		if (nDstCount > batchSize)
+		{
+			int16_t h_n = (n == 31) ? *(h_ptr - nHighStep) : *h_ptr;
+			int16_t tmp_n = h_n + 1;
+			if (n == 0)
+				tmp_n += h_n;
+			else if (n < 31)
+				tmp_n += *(h_ptr - nHighStep);
+			tmp_n >>= 1;
+			*dst_ptr = *l_ptr - tmp_n;
+			l_ptr += 1;
+			h_ptr += 1;
+			dst_ptr += 1;
+		}
+
+		dst_ptr += nDstStep;
+	}
+
+	if (forceBandSize < 32)
+	{
+		for (size_t x = 0; x < batchSize; x += 8)
+		{
+			int16x8_t l_n = vld1q_s16(l_ptr);
+			int16x8_t h_n = vld1q_s16(h_ptr - nHighStep);
+			int16x8_t tmp_n = vsubq_s16(l_n, h_n);
+			vst1q_s16(dst_ptr, tmp_n);
+			l_ptr += 8;
+			h_ptr += 8;
+			dst_ptr += 8;
+		}
+
+		if (nDstCount > batchSize)
+		{
+			*dst_ptr = *l_ptr - *(h_ptr - nHighStep);
+			l_ptr += 1;
+			h_ptr += 1;
+			dst_ptr += 1;
+		}
+	}
+
+	h_ptr = pHighBand;
+	dst_ptr = pDstBand + nDstStep;
+
+	/* Odd coefficients */
+	for (size_t n = 0; n < forceBandSize; n++)
+	{
+		for (size_t x = 0; x < batchSize; x += 8)
+		{
+			// dst[2n + 1] = (h[n] << 1) + ((dst[2n] + dst[2n + 2]) >> 1);
+			int16x8_t tmp_n = vld1q_s16(dst_ptr - nDstStep);
+			if (n == 31)
+			{
+				int16x8_t dst_n_p = vld1q_s16(l_ptr);
+				l_ptr += 8;
+				tmp_n = vaddq_s16(tmp_n, dst_n_p);
+				tmp_n = vshrq_n_s16(tmp_n, 1);
+			}
+			else
+			{
+				int16x8_t dst_n_p = vld1q_s16(dst_ptr + nDstStep);
+				tmp_n = vaddq_s16(tmp_n, dst_n_p);
+				tmp_n = vshrq_n_s16(tmp_n, 1);
+				int16x8_t h_n = vld1q_s16(h_ptr);
+				h_n = vshlq_n_s16(h_n, 1);
+				tmp_n = vaddq_s16(tmp_n, h_n);
+			}
+			vst1q_s16(dst_ptr, tmp_n);
+			h_ptr += 8;
+			dst_ptr += 8;
+		}
+
+		if (nDstCount > batchSize)
+		{
+			int16_t tmp_n = *(dst_ptr - nDstStep);
+			if (n == 31)
+			{
+				int16_t dst_n_p = *l_ptr;
+				l_ptr += 1;
+				tmp_n += dst_n_p;
+				tmp_n >>= 1;
+			}
+			else
+			{
+				int16_t dst_n_p = *(dst_ptr + nDstStep);
+				tmp_n += dst_n_p;
+				tmp_n >>= 1;
+				int16_t h_n = *h_ptr;
+				h_n <<= 1;
+				tmp_n += h_n;
+			}
+			*dst_ptr = tmp_n;
+			h_ptr += 1;
+			dst_ptr += 1;
+		}
+
+		dst_ptr += nDstStep;
+	}
+}
+
+static INLINE size_t prfx_get_band_l_count(size_t level)
+{
+	return (64 >> level) + 1;
+}
+
+static INLINE size_t prfx_get_band_h_count(size_t level)
+{
+	if (level == 1)
+		return (64 >> 1) - 1;
+	else
+		return (64 + (1 << (level - 1))) >> level;
+}
+
+static INLINE void rfx_dwt_2d_decode_extrapolate_block_neon(INT16* buffer, INT16* temp,
+                                                            size_t level)
+{
+	size_t nDstStepX;
+	size_t nDstStepY;
+	INT16 *HL, *LH;
+	INT16 *HH, *LL;
+	INT16 *L, *H, *LLx;
+
+	const size_t nBandL = prfx_get_band_l_count(level);
+	const size_t nBandH = prfx_get_band_h_count(level);
+	size_t offset = 0;
+
+	WINPR_ASSERT(buffer);
+	WINPR_ASSERT(temp);
+
+	HL = &buffer[offset];
+	offset += (nBandH * nBandL);
+	LH = &buffer[offset];
+	offset += (nBandL * nBandH);
+	HH = &buffer[offset];
+	offset += (nBandH * nBandH);
+	LL = &buffer[offset];
+	nDstStepX = (nBandL + nBandH);
+	nDstStepY = (nBandL + nBandH);
+	offset = 0;
+	L = &temp[offset];
+	offset += (nBandL * nDstStepX);
+	H = &temp[offset];
+	LLx = &buffer[0];
+
+	/* horizontal (LL + HL -> L) */
+	rfx_idwt_extrapolate_horiz_neon(LL, nBandL, HL, nBandH, L, nDstStepX, nBandL, nBandH, nBandL);
+
+	/* horizontal (LH + HH -> H) */
+	rfx_idwt_extrapolate_horiz_neon(LH, nBandL, HH, nBandH, H, nDstStepX, nBandL, nBandH, nBandH);
+
+	/* vertical (L + H -> LL) */
+	rfx_idwt_extrapolate_vert_neon(L, nDstStepX, H, nDstStepX, LLx, nDstStepY, nBandL, nBandH,
+	                               nBandL + nBandH);
+}
+
+static void rfx_dwt_2d_extrapolate_decode_neon(INT16* buffer, INT16* temp)
+{
+	WINPR_ASSERT(buffer);
+	WINPR_ASSERT(temp);
+	rfx_dwt_2d_decode_extrapolate_block_neon(&buffer[3807], temp, 3);
+	rfx_dwt_2d_decode_extrapolate_block_neon(&buffer[3007], temp, 2);
+	rfx_dwt_2d_decode_extrapolate_block_neon(&buffer[0], temp, 1);
+}
+
 void rfx_init_neon(RFX_CONTEXT* context)
 {
 	if (IsProcessorFeaturePresent(PF_ARM_NEON_INSTRUCTIONS_AVAILABLE))
@@ -236,6 +528,7 @@ void rfx_init_neon(RFX_CONTEXT* context)
 		PROFILER_RENAME(context->priv->prof_rfx_dwt_2d_decode, "rfx_dwt_2d_decode_NEON");
 		context->quantization_decode = rfx_quantization_decode_NEON;
 		context->dwt_2d_decode = rfx_dwt_2d_decode_NEON;
+		context->dwt_2d_extrapolate_decode = rfx_dwt_2d_extrapolate_decode_neon;
 	}
 }
 

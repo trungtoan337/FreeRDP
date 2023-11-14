@@ -82,11 +82,12 @@ struct WTSVirtualChannelManager
 	rdpPeerChannel* drdynvc_channel;
 	BYTE drdynvc_state;
 	LONG dvc_channel_id_seq;
+	UINT16 dvc_spoken_version;
 
 	psDVCCreationStatusCallback dvc_creation_status;
 	void* dvc_creation_status_userdata;
 
-	wArrayList* dynamicVirtualChannels;
+	wHashTable* dynamicVirtualChannels;
 };
 
 FREERDP_LOCAL BOOL WINAPI FreeRDP_WTSStartRemoteControlSessionW(LPWSTR pTargetServerName,

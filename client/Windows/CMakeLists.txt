@@ -88,6 +88,7 @@ if(WITH_CLIENT_INTERFACE)
         set_target_properties(${MODULE_NAME} PROPERTIES VERSION ${FREERDP_VERSION} SOVERSION ${FREERDP_API_VERSION})
     endif()
     set_target_properties(${MODULE_NAME} PROPERTIES OUTPUT_NAME ${MODULE_NAME}${FREERDP_API_VERSION})
+    target_include_directories(${MODULE_NAME} INTERFACE $<INSTALL_INTERFACE:include>)
 else()
 	set(${MODULE_PREFIX}_SRCS ${${MODULE_PREFIX}_SRCS} cli/wfreerdp.c cli/wfreerdp.h)
 	add_executable(${MODULE_NAME} ${WIN32_GUI_FLAG} ${${MODULE_PREFIX}_SRCS})
@@ -97,7 +98,12 @@ endif()
 
 list(APPEND LIBS freerdp-client)
 list(APPEND LIBS winpr freerdp)
-list(APPEND LIBS msimg32 credui ntdll)
+
+list(APPEND LIBS msimg32.lib credui.lib)
+
+if (MINGW)
+	list(APPEND LIBS ntdll.lib) # only required with MINGW
+endif()
 target_link_libraries(${MODULE_NAME} PRIVATE ${LIBS})
 
 if(WITH_CLIENT_INTERFACE)

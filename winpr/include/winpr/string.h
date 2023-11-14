@@ -80,6 +80,7 @@ extern "C"
 	WINPR_API char* strtok_s(char* strToken, const char* strDelimit, char** context);
 	WINPR_API WCHAR* wcstok_s(WCHAR* strToken, const WCHAR* strDelimit, WCHAR** context);
 
+	WINPR_API WCHAR* _wcsncat(WCHAR* dst, const WCHAR* src, size_t sz);
 #else
 
 #define _wcscmp wcscmp
@@ -89,6 +90,7 @@ extern "C"
 #define _wcsstr wcsstr
 #define _wcschr wcschr
 #define _wcsrchr wcsrchr
+#define _wcsncat wcsncat
 
 #endif /* _WIN32 */
 
@@ -164,24 +166,6 @@ extern "C"
 #define IsCharLower IsCharLowerW
 #else
 #define IsCharLower IsCharLowerA
-#endif
-
-	WINPR_API int lstrlenA(LPCSTR lpString);
-	WINPR_API int lstrlenW(LPCWSTR lpString);
-
-#ifdef UNICODE
-#define lstrlen lstrlenW
-#else
-#define lstrlen lstrlenA
-#endif
-
-	WINPR_API int lstrcmpA(LPCSTR lpString1, LPCSTR lpString2);
-	WINPR_API int lstrcmpW(LPCWSTR lpString1, LPCWSTR lpString2);
-
-#ifdef UNICODE
-#define lstrcmp lstrcmpW
-#else
-#define lstrcmp lstrcmpA
 #endif
 
 #endif

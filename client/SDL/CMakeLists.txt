@@ -37,6 +37,39 @@ include(ConfigureRPATH)
 
 option(WITH_DEBUG_SDL_EVENTS "[dangerous, not for release builds!] Debug SDL events" OFF)
 option(WITH_DEBUG_SDL_KBD_EVENTS "[dangerous, not for release builds!] Debug SDL keyboard events" OFF)
+option(WITH_WIN_CONSOLE "Build ${PROJECT_NAME} with console support" ON)
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "project default" FORCE)
+endif()
+
+# Configure MSVC Runtime
+if(MSVC)
+	include(MSVCRuntime)
+	if(NOT DEFINED MSVC_RUNTIME)
+		set(MSVC_RUNTIME "dynamic" CACHE STRING "MSVC runtime type [dynamic|static]")
+	endif()
+	if(MSVC_RUNTIME STREQUAL "static")
+		if(BUILD_SHARED_LIBS)
+			message(FATAL_ERROR "Static CRT is only supported in a fully static build")
+		endif()
+		message(STATUS "Use the MSVC static runtime option carefully!")
+		message(STATUS "OpenSSL uses /MD by default, and is very picky")
+		message(STATUS "Random freeing errors are a common sign of runtime issues")
+	endif()
+	configure_msvc_runtime()
+
+	if(NOT DEFINED CMAKE_SUPPRESS_REGENERATION)
+		set(CMAKE_SUPPRESS_REGENERATION ON)
+	endif()
+endif()
+
+if(WITH_WIN_CONSOLE)
+  set(WIN32_GUI_FLAG "")
+else()
+  set(WIN32_GUI_FLAG "WIN32")
+endif()
+
 
 if (WITH_DEBUG_SDL_EVENTS)
 	add_definitions(-DWITH_DEBUG_SDL_EVENTS)
@@ -45,12 +78,13 @@ if (WITH_DEBUG_SDL_KBD_EVENTS)
 	add_definitions(-DWITH_DEBUG_SDL_KBD_EVENTS)
 endif()
 
-find_package(SDL2 REQUIRED)
+find_package(SDL2 REQUIRED COMPONENTS)
 include_directories(${SDL2_INCLUDE_DIR})
 include_directories(${SDL2_INCLUDE_DIRS})
 
 find_package(Threads REQUIRED)
 
+add_subdirectory(dialogs)
 set(SRCS
     sdl_types.hpp
     sdl_utils.cpp
@@ -70,35 +104,21 @@ set(SRCS
     sdl_channels.hpp
     sdl_channels.cpp)
 
+add_subdirectory(aad)
 set(LIBS
 	${SDL2_LIBRARIES}
         winpr
         freerdp
         freerdp-client
         Threads::Threads
+        dialogs
+				aad-view
     )
-
-option(WITH_WEBVIEW "Build with QtWebEngine support for AAD login popup browser" OFF)
-if (WITH_WEBVIEW)
-  find_package(Qt5 COMPONENTS WebEngineWidgets REQUIRED)
-
-  list(APPEND SRCS
-      sdl_webview.cpp
-      sdl_webview.hpp
-      )
-  list(APPEND LIBS Qt5::WebEngineWidgets)
-endif()
 
 add_executable(${PROJECT_NAME}
+	${WIN32_GUI_FLAG}
 	${SRCS}
     )
-
-if (WITH_WEBVIEW)
-	target_compile_definitions(
-		${PROJECT_NAME} PRIVATE
-		-DWITH_WEBVIEW
-	)
-endif()
 
 set_target_properties(${PROJECT_NAME}
     PROPERTIES

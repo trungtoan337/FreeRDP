@@ -690,7 +690,7 @@ static UINT remdesk_process_receive(remdeskPlugin* remdesk, wStream* s)
 
 #if 0
 	WLog_DBG(TAG, "RemdeskReceive: %"PRIuz"", Stream_GetRemainingLength(s));
-	winpr_HexDump(Stream_Pointer(s), Stream_GetRemainingLength(s));
+	winpr_HexDump(Stream_ConstPointer(s), Stream_GetRemainingLength(s));
 #endif
 
 	if ((status = remdesk_read_channel_header(s, &header)))
@@ -1040,7 +1040,8 @@ static VOID VCAPITYPE remdesk_virtual_channel_init_event_ex(LPVOID lpUserParam, 
 /* remdesk is always built-in */
 #define VirtualChannelEntryEx remdesk_VirtualChannelEntryEx
 
-BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS pEntryPoints, PVOID pInitHandle)
+FREERDP_ENTRY_POINT(BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS pEntryPoints,
+                                                         PVOID pInitHandle))
 {
 	UINT rc;
 	remdeskPlugin* remdesk;

@@ -30,15 +30,9 @@
 #include <unistd.h>
 
 #include <winpr/string.h>
+#include <winpr/platform.h>
 
-#if __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wparentheses-equality"
-#endif /* __clang__ */
 #include <gst/gst.h>
-#if __clang__
-#pragma clang diagnostic pop
-#endif /* __clang__ */
 
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
@@ -1009,7 +1003,7 @@ static BOOL tsmf_gstreamer_sync(ITSMFDecoder* decoder, void (*cb)(void*), void* 
 	return TRUE;
 }
 
-ITSMFDecoder* gstreamer_freerdp_tsmf_client_decoder_subsystem_entry(void)
+FREERDP_ENTRY_POINT(ITSMFDecoder* gstreamer_freerdp_tsmf_client_decoder_subsystem_entry(void))
 {
 	TSMFGstreamerDecoder* decoder;
 

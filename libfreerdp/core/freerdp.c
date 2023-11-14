@@ -23,6 +23,7 @@
 
 #include <string.h>
 #include <stdarg.h>
+#include <time.h>
 
 #include "rdp.h"
 #include "input.h"
@@ -393,6 +394,44 @@ DWORD freerdp_get_event_handles(rdpContext* context, HANDLE* events, DWORD count
 	return nCount;
 }
 
+/* Resend mouse cursor position to prevent session lock in prevent-session-lock mode */
+static BOOL freerdp_prevent_session_lock(rdpContext* context)
+{
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->input);
+
+	rdp_input_internal* in = input_cast(context->input);
+
+	UINT32 FakeMouseMotionInterval =
+	    freerdp_settings_get_uint32(context->settings, FreeRDP_FakeMouseMotionInterval);
+	if (FakeMouseMotionInterval && in->lastInputTimestamp)
+	{
+		const time_t now = time(NULL);
+		if (now - in->lastInputTimestamp > FakeMouseMotionInterval)
+		{
+			WLog_Print(context->log, WLOG_DEBUG,
+			           "fake mouse move: x=%d y=%d lastInputTimestamp=%d "
+			           "FakeMouseMotionInterval=%d",
+			           in->lastX, in->lastY, in->lastInputTimestamp, FakeMouseMotionInterval);
+
+			BOOL status = freerdp_input_send_mouse_event(context->input, PTR_FLAGS_MOVE, in->lastX,
+			                                             in->lastY);
+			if (!status)
+			{
+				if (freerdp_get_last_error(context) == FREERDP_ERROR_SUCCESS)
+					WLog_Print(context->log, WLOG_ERROR,
+					           "freerdp_prevent_session_lock() failed - %" PRIi32 "", status);
+
+				return FALSE;
+			}
+
+			return status;
+		}
+	}
+
+	return TRUE;
+}
+
 BOOL freerdp_check_event_handles(rdpContext* context)
 {
 	WINPR_ASSERT(context);
@@ -429,6 +468,8 @@ BOOL freerdp_check_event_handles(rdpContext* context)
 
 		return FALSE;
 	}
+
+	status = freerdp_prevent_session_lock(context);
 
 	return status;
 }
@@ -1210,7 +1251,8 @@ void clearChannelError(rdpContext* context)
 	ResetEvent(context->channelErrorEvent);
 }
 
-void setChannelError(rdpContext* context, UINT errorNum, const char* format, ...)
+WINPR_ATTR_FORMAT_ARG(3, 4)
+void setChannelError(rdpContext* context, UINT errorNum, WINPR_FORMAT_ARG const char* format, ...)
 {
 	va_list ap;
 	va_start(ap, format);

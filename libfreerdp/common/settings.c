@@ -2030,12 +2030,22 @@ const char* freerdp_rdp_version_string(UINT32 version)
 		case RDP_VERSION_10_9:
 			return "RDP_VERSION_10_9";
 		case RDP_VERSION_10_10:
-			return "RDP_VERSION_10_11";
+			return "RDP_VERSION_10_10";
 		case RDP_VERSION_10_11:
 			return "RDP_VERSION_10_11";
+		case RDP_VERSION_10_12:
+			return "RDP_VERSION_10_12";
 		default:
 			return "RDP_VERSION_UNKNOWN";
 	}
+}
+
+BOOL freerdp_settings_take_string(rdpSettings* settings, size_t id, char* param)
+{
+	size_t len = 0;
+	if (param)
+		len = strlen(param);
+	return freerdp_settings_set_string_(settings, id, param, len);
 }
 
 BOOL freerdp_settings_set_string_from_utf16(rdpSettings* settings, size_t id, const WCHAR* param)
@@ -2171,7 +2181,7 @@ const char* freerdp_supported_color_depths_string(UINT16 mask, char* buffer, siz
 	if (invalid != 0)
 	{
 		char str[32] = { 0 };
-		_snprintf(str, sizeof(str), "RNS_UD_INVALID[0x%04" PRIx16 "]", invalid);
+		_snprintf(str, sizeof(str), "RNS_UD_INVALID[0x%04" PRIx32 "]", invalid);
 		winpr_str_append(str, buffer, size, "|");
 	}
 	char hex[32] = { 0 };

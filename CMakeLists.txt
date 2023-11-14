@@ -26,8 +26,14 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
+# Default to release build type
+if(NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE "Release" CACHE STRING "project default" FORCE)
+endif()
+
 add_custom_target(fuzzers
-                  COMMENT "Build fuzzers")
+	COMMENT "Build fuzzers"
+)
 
 if(NOT DEFINED VENDOR)
 	set(VENDOR "FreeRDP" CACHE STRING "FreeRDP package vendor")
@@ -55,7 +61,7 @@ if (NOT WIN32 AND NOT ANDROID)
 endif()
 
 # Include our extra modules
-set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/)
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/)
 
 if((CMAKE_SYSTEM_NAME MATCHES "WindowsStore") AND (CMAKE_SYSTEM_VERSION MATCHES "10.0"))
 	set(UWP 1)
@@ -71,11 +77,12 @@ if(WITH_CLANG_FORMAT)
 	include(ClangFormat)
 endif()
 
+include(CompilerFlags)
+include(DetectBSD)
 include(CheckIncludeFiles)
 include(CheckLibraryExists)
 include(CheckSymbolExists)
 include(CheckStructHasMember)
-include(FindPkgConfig)
 include(TestBigEndian)
 
 include(FindFeature)
@@ -103,7 +110,7 @@ endif()
 set(WITH_LIBRARY_VERSIONING "ON")
 
 set(VERSION_REGEX "^(.*)([0-9]+)\\.([0-9]+)\\.([0-9]+)-?(.*)")
-set(RAW_VERSION_STRING "3.0.0-dev")
+set(RAW_VERSION_STRING "3.0.0-dev5")
 if(EXISTS "${PROJECT_SOURCE_DIR}/.source_tag")
 	file(READ ${PROJECT_SOURCE_DIR}/.source_tag RAW_VERSION_STRING)
 elseif(USE_VERSION_FROM_GIT_TAG)
@@ -152,7 +159,7 @@ message(STATUS "Git Revision ${GIT_REVISION}")
 set(FREERDP_MAJOR_DIR "freerdp${FREERDP_VERSION_MAJOR}")
 set(FREERDP_INCLUDE_DIR "include/${FREERDP_MAJOR_DIR}/")
 
-option(WITH_SMARTCARD_EMULATE "Emulate smartcards instead of redirecting readers" OFF)
+option(WITH_SMARTCARD_EMULATE "Emulate smartcards instead of redirecting readers" ON)
 if (WITH_SMARTCARD_EMULATE)
 	add_definitions(-DWITH_SMARTCARD_EMULATE)
 	find_package(ZLIB REQUIRED)
@@ -165,7 +172,7 @@ endif()
 
 option(WITH_FREERDP_DEPRECATED_COMMANDLINE "Build FreeRDP deprecated command line options" OFF)
 if (WITH_FREERDP_DEPRECATED_COMMANDLINE)
-    add_definitions(-DWITH_FREERDP_DEPRECATED_COMMANDLINE)
+	add_definitions(-DWITH_FREERDP_DEPRECATED_COMMANDLINE)
 endif()
 
 # Make paths absolute
@@ -196,10 +203,6 @@ endif(CMAKE_CROSSCOMPILING)
 # Turn on solution folders (2.8.4+)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-# Default to release build type
-if(NOT CMAKE_BUILD_TYPE)
-	set(CMAKE_BUILD_TYPE "Release")
-endif()
 
 set(LIB_DEFAULT ON)
 if (IOS)
@@ -221,25 +224,6 @@ if (EXPORT_ALL_SYMBOLS)
 	add_definitions(-DEXPORT_ALL_SYMBOLS)
 endif(EXPORT_ALL_SYMBOLS)
 
-# BSD
-if(${CMAKE_SYSTEM_NAME} MATCHES "BSD")
-	set(BSD TRUE)
-	if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
-		set(FREEBSD TRUE)
-	endif()
-	if(${CMAKE_SYSTEM_NAME} MATCHES "kFreeBSD")
-		set(KFREEBSD TRUE)
-	endif()
-	if(${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
-		set(OPENBSD TRUE)
-	endif()
-endif()
-
-if(${CMAKE_SYSTEM_NAME} MATCHES "DragonFly")
-	set(BSD TRUE)
-	set(FREEBSD TRUE)
-endif()
-
 if(FREEBSD)
 	find_path(EPOLLSHIM_INCLUDE_DIR NAMES sys/epoll.h sys/timerfd.h HINTS /usr/local/include/libepoll-shim)
 	find_library(EPOLLSHIM_LIBS NAMES epoll-shim libepoll-shim HINTS /usr/local/lib)
@@ -249,7 +233,7 @@ endif()
 if(MSVC)
 	include(MSVCRuntime)
 	if(NOT DEFINED MSVC_RUNTIME)
-		set(MSVC_RUNTIME "dynamic")
+		set(MSVC_RUNTIME "dynamic" CACHE STRING "MSVC runtime type [dynamic|static]")
 	endif()
 	if(MSVC_RUNTIME STREQUAL "static")
 		if(BUILD_SHARED_LIBS)
@@ -409,19 +393,7 @@ if(${CMAKE_C_COMPILER_ID} STREQUAL "Clang" OR CMAKE_COMPILER_IS_GNUCC)
 endif()
 
 if(MSVC)
-	# Remove previous warning definitions,
-	# NMake is otherwise complaining.
-	foreach (flags_var_to_scrub
-		CMAKE_C_FLAGS
-		CMAKE_C_FLAGS_RELEASE
-		CMAKE_C_FLAGS_RELWITHDEBINFO
-		CMAKE_C_FLAGS_MINSIZEREL)
-		string (REGEX REPLACE "(^| )[/-]W[ ]*[1-9]" " "
-		"${flags_var_to_scrub}" "${${flags_var_to_scrub}}")
-	endforeach()
-
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /Gd")
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3")
 
 	set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR})
 	set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR})
@@ -431,6 +403,7 @@ if(MSVC)
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /Zi")
 	endif()
 
+	add_definitions(-D_CRT_NONSTDC_NO_DEPRECATE)
 endif()
 
 if(ANDROID)
@@ -505,16 +478,6 @@ if(APPLE)
 	endif()
 endif(APPLE)
 
-# OpenBSD
-if(OPENBSD)
-	set(WITH_MANPAGES "ON")
-	set(WITH_ALSA "OFF")
-	set(WITH_PULSE "OFF")
-	set(WITH_OSS "OFF")
-	set(WITH_SNDIO "ON")
-	set(WITH_WAYLAND "OFF")
-endif()
-
 # Android
 if(ANDROID)
 	set(WITH_LIBRARY_VERSIONING "OFF")
@@ -565,12 +528,12 @@ if(ANDROID)
 endif()
 
 if(WITH_VALGRIND_MEMCHECK)
-    check_include_files(valgrind/memcheck.h FREERDP_HAVE_VALGRIND_MEMCHECK_H)
+	check_include_files(valgrind/memcheck.h FREERDP_HAVE_VALGRIND_MEMCHECK_H)
 else()
-    unset(FREERDP_HAVE_VALGRIND_MEMCHECK_H CACHE)
+	unset(FREERDP_HAVE_VALGRIND_MEMCHECK_H CACHE)
 endif()
 
-if(UNIX OR CYGWIN)
+if((UNIX OR CYGWIN) AND NOT BSD)
 	set(WAYLAND_FEATURE_TYPE "RECOMMENDED")
 else()
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
@@ -583,10 +546,6 @@ endif()
 set(WAYLAND_FEATURE_PURPOSE "Wayland")
 set(WAYLAND_FEATURE_DESCRIPTION "Wayland client")
 
-set(ZLIB_FEATURE_TYPE "REQUIRED")
-set(ZLIB_FEATURE_PURPOSE "compression")
-set(ZLIB_FEATURE_DESCRIPTION "data compression")
-
 set(OPENSSL_FEATURE_TYPE "REQUIRED")
 set(OPENSSL_FEATURE_PURPOSE "cryptography")
 set(OPENSSL_FEATURE_DESCRIPTION "encryption, certificate validation, hashing functions")
@@ -595,37 +554,9 @@ set(MBEDTLS_FEATURE_TYPE "OPTIONAL")
 set(MBEDTLS_FEATURE_PURPOSE "cryptography")
 set(MBEDTLS_FEATURE_DESCRIPTION "encryption, certificate validation, hashing functions")
 
-set(OPENSLES_FEATURE_TYPE "OPTIONAL")
-set(OPENSLES_FEATURE_PURPOSE "multimedia")
-set(OPENSLES_FEATURE_DESCRIPTION "OpenSLES audio / video")
-
-set(OSS_FEATURE_TYPE "RECOMMENDED")
-set(OSS_FEATURE_PURPOSE "sound")
-set(OSS_FEATURE_DESCRIPTION "audio input, audio output and multimedia redirection")
-
-set(ALSA_FEATURE_TYPE "RECOMMENDED")
-set(ALSA_FEATURE_PURPOSE "sound")
-set(ALSA_FEATURE_DESCRIPTION "audio input, audio output and multimedia redirection")
-
-set(SNDIO_FEATURE_TYPE "OPTIONAL")
-set(SNDIO_FEATURE_PURPOSE "sound")
-set(SNDIO_FEATURE_DESCRIPTION "OpenBSD audio input/output")
-
-set(PULSE_FEATURE_TYPE "RECOMMENDED")
-set(PULSE_FEATURE_PURPOSE "sound")
-set(PULSE_FEATURE_DESCRIPTION "audio input, audio output and multimedia redirection")
-
-set(CUPS_FEATURE_TYPE "RECOMMENDED")
-set(CUPS_FEATURE_PURPOSE "printing")
-set(CUPS_FEATURE_DESCRIPTION "printer device redirection")
-
 set(PCSC_FEATURE_TYPE "RECOMMENDED")
 set(PCSC_FEATURE_PURPOSE "smart card")
 set(PCSC_FEATURE_DESCRIPTION "smart card device redirection")
-
-set(CJSON_FEATURE_TYPE "RECOMMENDED")
-set(CJSON_FEATURE_PURPOSE "JSON")
-set(CJSON_FEATURE_DESCRIPTION "Azure AD, RDS AAD authentication")
 
 set(FFMPEG_FEATURE_TYPE "RECOMMENDED")
 set(FFMPEG_FEATURE_PURPOSE "multimedia")
@@ -673,75 +604,35 @@ set(SOXR_FEATURE_DESCRIPTION "SOX audio resample library")
 
 if(WIN32)
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
-	set(ZLIB_FEATURE_TYPE "OPTIONAL")
-	set(OSS_FEATURE_TYPE "DISABLED")
-	set(ALSA_FEATURE_TYPE "DISABLED")
-	set(SNDIO_FEATURE_TYPE "DISABLED")
-	set(PULSE_FEATURE_TYPE "DISABLED")
-	set(CUPS_FEATURE_TYPE "DISABLED")
 	set(PCSC_FEATURE_TYPE "DISABLED")
 	set(FFMPEG_FEATURE_TYPE "OPTIONAL")
 	set(VAAPI_FEATURE_TYPE "DISABLED")
-	set(OPENSLES_FEATURE_TYPE "DISABLED")
 endif()
 
 if(APPLE)
 	set(FFMPEG_FEATURE_TYPE "OPTIONAL")
 	set(VAAPI_FEATURE_TYPE "DISABLED")
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
-	set(OSS_FEATURE_TYPE "DISABLED")
-	set(ALSA_FEATURE_TYPE "DISABLED")
-	set(SNDIO_FEATURE_TYPE "DISABLED")
 	if(IOS)
-		set(PULSE_FEATURE_TYPE "DISABLED")
-		set(CUPS_FEATURE_TYPE "DISABLED")
 		set(PCSC_FEATURE_TYPE "DISABLED")
 	endif()
-	set(OPENSLES_FEATURE_TYPE "DISABLED")
 endif()
-
-if(UNIX AND NOT ANDROID)
-	set(WLOG_SYSTEMD_JOURNAL_FEATURE_TYPE "RECOMMENDED")
-	set(WLOG_SYSTEMD_JOURNAL_FEATURE_PURPOSE "systemd journal appender")
-	set(WLOG_SYSTEMD_JOURNAL_FEATURE_DESCRIPTION "allows to export wLog to systemd journal")
-
-	#include(Findlibsystemd)
-	find_feature(libsystemd ${WLOG_SYSTEMD_JOURNAL_FEATURE_TYPE} ${WLOG_SYSTEMD_JOURNAL_FEATURE_PURPOSE} ${WLOG_SYSTEMD_JOURNAL_FEATURE_DESCRIPTION})
-
-	if(LIBSYSTEMD_FOUND)
-        set(WINPR_HAVE_JOURNALD_H TRUE)
-	else()
-        unset(WINPR_HAVE_JOURNALD_H)
-	endif()
-endif(UNIX AND NOT ANDROID)
 
 if(ANDROID)
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
-	set(OSS_FEATURE_TYPE "DISABLED")
-	set(ALSA_FEATURE_TYPE "DISABLED")
-	set(SNDIO_FEATURE_TYPE "DISABLED")
-	set(PULSE_FEATURE_TYPE "DISABLED")
-	set(CUPS_FEATURE_TYPE "DISABLED")
 	set(PCSC_FEATURE_TYPE "DISABLED")
 	set(VAAPI_FEATURE_TYPE "DISABLED")
-	set(OPENSLES_FEATURE_TYPE "REQUIRED")
 endif()
 
 find_feature(Wayland ${WAYLAND_FEATURE_TYPE} ${WAYLAND_FEATURE_PURPOSE} ${WAYLAND_FEATURE_DESCRIPTION})
 
-find_feature(ZLIB ${ZLIB_FEATURE_TYPE} ${ZLIB_FEATURE_PURPOSE} ${ZLIB_FEATURE_DESCRIPTION})
 find_feature(OpenSSL ${OPENSSL_FEATURE_TYPE} ${OPENSSL_FEATURE_PURPOSE} ${OPENSSL_FEATURE_DESCRIPTION})
 find_feature(MbedTLS ${MBEDTLS_FEATURE_TYPE} ${MBEDTLS_FEATURE_PURPOSE} ${MBEDTLS_FEATURE_DESCRIPTION})
-find_feature(OpenSLES ${OPENSLES_FEATURE_TYPE} ${OPENSLES_FEATURE_PURPOSE} ${OPENSLES_FEATURE_DESCRIPTION})
 
-find_feature(OSS ${OSS_FEATURE_TYPE} ${OSS_FEATURE_PURPOSE} ${OSS_FEATURE_DESCRIPTION})
-find_feature(ALSA ${ALSA_FEATURE_TYPE} ${ALSA_FEATURE_PURPOSE} ${ALSA_FEATURE_DESCRIPTION})
-find_feature(Pulse ${PULSE_FEATURE_TYPE} ${PULSE_FEATURE_PURPOSE} ${PULSE_FEATURE_DESCRIPTION})
-
-find_feature(Cups ${CUPS_FEATURE_TYPE} ${CUPS_FEATURE_PURPOSE} ${CUPS_FEATURE_DESCRIPTION})
 find_feature(PCSC ${PCSC_FEATURE_TYPE} ${PCSC_FEATURE_PURPOSE} ${PCSC_FEATURE_DESCRIPTION})
 
-find_feature(CJSON ${CJSON_FEATURE_TYPE} ${CJSON_FEATURE_PURPOSE} ${CJSON_FEATURE_DESCRIPTION})
+find_package(cJSON)
+option(WITH_AAD "Compile with support for Azure AD authentication" ${cJSON_FOUND})
 
 if (WITH_DSP_FFMPEG OR WITH_VIDEO_FFMPEG OR WITH_FFMPEG)
 	set(FFMPEG_FEATURE_TYPE "REQUIRED" )
@@ -967,9 +858,9 @@ endif()
 set(FREERDP_BUILD_CONFIG_LIST "")
 GET_CMAKE_PROPERTY(res VARIABLES)
 FOREACH(var ${res})
-    IF (var MATCHES "^WITH_*|^BUILD_TESTING|^WINPR_HAVE_*")
-				LIST(APPEND FREERDP_BUILD_CONFIG_LIST "${var}=${${var}}")
-		ENDIF()
+	IF (var MATCHES "^WITH_*|^BUILD_TESTING|^WINPR_HAVE_*")
+		LIST(APPEND FREERDP_BUILD_CONFIG_LIST "${var}=${${var}}")
+	ENDIF()
 ENDFOREACH()
 string(REPLACE ";" " " FREERDP_BUILD_CONFIG "${FREERDP_BUILD_CONFIG_LIST}")
 

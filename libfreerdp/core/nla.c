@@ -54,6 +54,12 @@
 
 #define NLA_AUTH_PKG NEGO_SSP_NAME
 
+typedef enum
+{
+	AUTHZ_SUCCESS = 0x00000000,
+	AUTHZ_ACCESS_DENIED = 0x00000005,
+} AUTHZ_RESULT;
+
 /**
  * TSRequest ::= SEQUENCE {
  * 	version    [0] INTEGER,
@@ -127,6 +133,7 @@ struct rdp_nla
 	char* pkinitArgs;
 	SmartcardCertInfo* smartcardCert;
 	BYTE certSha1[20];
+	BOOL earlyUserAuth;
 };
 
 static BOOL nla_send(rdpNla* nla);
@@ -137,6 +144,13 @@ static BOOL nla_decrypt_public_key_echo(rdpNla* nla);
 static BOOL nla_decrypt_public_key_hash(rdpNla* nla);
 static BOOL nla_encrypt_ts_credentials(rdpNla* nla);
 static BOOL nla_decrypt_ts_credentials(rdpNla* nla);
+
+void nla_set_early_user_auth(rdpNla* nla, BOOL earlyUserAuth)
+{
+	WINPR_ASSERT(nla);
+	WLog_DBG(TAG, "Early User Auth active: %s", earlyUserAuth ? "true" : "false");
+	nla->earlyUserAuth = earlyUserAuth;
+}
 
 static void nla_buffer_free(rdpNla* nla)
 {
@@ -551,6 +565,21 @@ static int nla_client_recv_pub_key_auth(rdpNla* nla)
 	if (!nla_send(nla))
 		return -1;
 
+	if (nla->earlyUserAuth)
+	{
+		transport_set_early_user_auth_mode(nla->transport, TRUE);
+		nla_set_state(nla, NLA_STATE_EARLY_USER_AUTH);
+	}
+	else
+		nla_set_state(nla, NLA_STATE_AUTH_INFO);
+	return 1;
+}
+
+static int nla_client_recv_early_user_auth(rdpNla* nla)
+{
+	WINPR_ASSERT(nla);
+
+	transport_set_early_user_auth_mode(nla->transport, FALSE);
 	nla_set_state(nla, NLA_STATE_AUTH_INFO);
 	return 1;
 }
@@ -566,6 +595,9 @@ static int nla_client_recv(rdpNla* nla)
 
 		case NLA_STATE_PUB_KEY_AUTH:
 			return nla_client_recv_pub_key_auth(nla);
+
+		case NLA_STATE_EARLY_USER_AUTH:
+			return nla_client_recv_early_user_auth(nla);
 
 		case NLA_STATE_FINAL:
 		default:
@@ -1053,6 +1085,55 @@ fail:
 	return status;
 }
 
+static BOOL set_creds_octetstring_to_settings(WinPrAsn1Decoder* dec, WinPrAsn1_tagId tagId,
+                                              BOOL optional, size_t settingId,
+                                              rdpSettings* settings)
+{
+	if (optional)
+	{
+		WinPrAsn1_tagId itemTag;
+		if (!WinPrAsn1DecPeekTag(dec, &itemTag) || (itemTag != tagId))
+			return TRUE;
+	}
+
+	BOOL error = FALSE;
+	WinPrAsn1_OctetString value;
+	/* note: not checking "error" value, as the not present optional item case is handled above
+	 *       if the function fails it's because of a real error not because the item is not present
+	 */
+	if (!WinPrAsn1DecReadContextualOctetString(dec, tagId, &error, &value, FALSE))
+		return FALSE;
+
+	return freerdp_settings_set_string_from_utf16N(settings, settingId, (const WCHAR*)value.data,
+	                                               value.len / sizeof(WCHAR));
+}
+
+static BOOL nla_read_TSCspDataDetail(WinPrAsn1Decoder* dec, rdpSettings* settings)
+{
+	BOOL error = FALSE;
+
+	/* keySpec [0] INTEGER */
+	WinPrAsn1_INTEGER keyspec;
+	if (!WinPrAsn1DecReadContextualInteger(dec, 0, &error, &keyspec))
+		return FALSE;
+	settings->KeySpec = (UINT32)keyspec;
+
+	/* cardName [1] OCTET STRING OPTIONAL */
+	if (!set_creds_octetstring_to_settings(dec, 1, TRUE, FreeRDP_CardName, settings))
+		return FALSE;
+
+	/* readerName [2] OCTET STRING OPTIONAL */
+	if (!set_creds_octetstring_to_settings(dec, 2, TRUE, FreeRDP_ReaderName, settings))
+		return FALSE;
+
+	/* containerName [3] OCTET STRING OPTIONAL */
+	if (!set_creds_octetstring_to_settings(dec, 3, TRUE, FreeRDP_ContainerName, settings))
+		return FALSE;
+
+	/* cspName [4] OCTET STRING OPTIONAL */
+	return set_creds_octetstring_to_settings(dec, 4, TRUE, FreeRDP_CspName, settings);
+}
+
 static BOOL nla_read_ts_credentials(rdpNla* nla, SecBuffer* data)
 {
 	WinPrAsn1Decoder dec = { 0 };
@@ -1081,34 +1162,57 @@ static BOOL nla_read_ts_credentials(rdpNla* nla, SecBuffer* data)
 
 	WinPrAsn1Decoder_InitMem(&dec, WINPR_ASN1_DER, credentials.data, credentials.len);
 
-	if (credType == 1)
+	rdpSettings* settings = nla->rdpcontext->settings;
+
+	switch (credType)
 	{
-		WinPrAsn1_OctetString domain = { 0 };
-		WinPrAsn1_OctetString username = { 0 };
-		WinPrAsn1_OctetString password = { 0 };
+		case 1:
+		{
+			/* TSPasswordCreds */
+			if (!WinPrAsn1DecReadSequence(&dec, &dec2))
+				return FALSE;
+			dec = dec2;
 
-		/* TSPasswordCreds */
-		if (!WinPrAsn1DecReadSequence(&dec, &dec2))
-			return FALSE;
-		dec = dec2;
+			/* domainName [0] OCTET STRING */
+			if (!set_creds_octetstring_to_settings(&dec, 0, FALSE, FreeRDP_Domain, settings))
+				return FALSE;
 
-		/* domainName [0] OCTET STRING */
-		if (!WinPrAsn1DecReadContextualOctetString(&dec, 0, &error, &domain, FALSE) && error)
-			return FALSE;
+			/* userName [1] OCTET STRING */
+			if (!set_creds_octetstring_to_settings(&dec, 1, FALSE, FreeRDP_Username, settings))
+				return FALSE;
 
-		/* userName [1] OCTET STRING */
-		if (!WinPrAsn1DecReadContextualOctetString(&dec, 1, &error, &username, FALSE) && error)
-			return FALSE;
+			/* password [2] OCTET STRING */
+			return set_creds_octetstring_to_settings(&dec, 2, FALSE, FreeRDP_Password, settings);
+		}
+		case 2:
+		{
+			/* TSSmartCardCreds */
+			if (!WinPrAsn1DecReadSequence(&dec, &dec2))
+				return FALSE;
+			dec = dec2;
 
-		/* password [2] OCTET STRING */
-		if (!WinPrAsn1DecReadContextualOctetString(&dec, 2, &error, &password, FALSE))
-			return FALSE;
+			/* pin [0] OCTET STRING, */
+			if (!set_creds_octetstring_to_settings(&dec, 0, FALSE, FreeRDP_Password, settings))
+				return FALSE;
+			settings->PasswordIsSmartcardPin = TRUE;
 
-		if (sspi_SetAuthIdentityWithLengthW(nla->identity, (const WCHAR*)username.data,
-		                                    username.len / sizeof(WCHAR), (const WCHAR*)domain.data,
-		                                    domain.len / sizeof(WCHAR), (const WCHAR*)password.data,
-		                                    password.len / sizeof(WCHAR)) < 0)
-			return FALSE;
+			/* cspData [1] TSCspDataDetail */
+			WinPrAsn1Decoder cspDetails = { 0 };
+			if (!WinPrAsn1DecReadContextualSequence(&dec, 1, &error, &cspDetails) && error)
+				return FALSE;
+			if (!nla_read_TSCspDataDetail(&cspDetails, settings))
+				return FALSE;
+
+			/* userHint [2] OCTET STRING OPTIONAL */
+			if (!set_creds_octetstring_to_settings(&dec, 2, TRUE, FreeRDP_Username, settings))
+				return FALSE;
+
+			/* domainHint [3] OCTET STRING OPTIONAL */
+			return set_creds_octetstring_to_settings(&dec, 3, TRUE, FreeRDP_Domain, settings);
+		}
+		default:
+			WLog_DBG(TAG, "TSCredentials type " PRIu32 " not supported for now", credType);
+			break;
 	}
 
 	return TRUE;
@@ -1552,63 +1656,81 @@ int nla_recv_pdu(rdpNla* nla, wStream* s)
 	WINPR_ASSERT(nla);
 	WINPR_ASSERT(s);
 
-	if (nla_decode_ts_request(nla, s) < 1)
-		return -1;
-
-	if (nla->errorCode)
+	if (nla_get_state(nla) == NLA_STATE_EARLY_USER_AUTH)
 	{
 		UINT32 code;
-
-		switch (nla->errorCode)
+		Stream_Read_UINT32(s, code);
+		if (code != AUTHZ_SUCCESS)
 		{
-			case STATUS_PASSWORD_MUST_CHANGE:
-				code = FREERDP_ERROR_CONNECT_PASSWORD_MUST_CHANGE;
-				break;
-
-			case STATUS_PASSWORD_EXPIRED:
-				code = FREERDP_ERROR_CONNECT_PASSWORD_EXPIRED;
-				break;
-
-			case STATUS_ACCOUNT_DISABLED:
-				code = FREERDP_ERROR_CONNECT_ACCOUNT_DISABLED;
-				break;
-
-			case STATUS_LOGON_FAILURE:
-				code = FREERDP_ERROR_CONNECT_LOGON_FAILURE;
-				break;
-
-			case STATUS_WRONG_PASSWORD:
-				code = FREERDP_ERROR_CONNECT_WRONG_PASSWORD;
-				break;
-
-			case STATUS_ACCESS_DENIED:
-				code = FREERDP_ERROR_CONNECT_ACCESS_DENIED;
-				break;
-
-			case STATUS_ACCOUNT_RESTRICTION:
-				code = FREERDP_ERROR_CONNECT_ACCOUNT_RESTRICTION;
-				break;
-
-			case STATUS_ACCOUNT_LOCKED_OUT:
-				code = FREERDP_ERROR_CONNECT_ACCOUNT_LOCKED_OUT;
-				break;
-
-			case STATUS_ACCOUNT_EXPIRED:
-				code = FREERDP_ERROR_CONNECT_ACCOUNT_EXPIRED;
-				break;
-
-			case STATUS_LOGON_TYPE_NOT_GRANTED:
-				code = FREERDP_ERROR_CONNECT_LOGON_TYPE_NOT_GRANTED;
-				break;
-
-			default:
-				WLog_ERR(TAG, "SPNEGO failed with NTSTATUS: 0x%08" PRIX32 "", nla->errorCode);
-				code = FREERDP_ERROR_AUTHENTICATION_FAILED;
-				break;
+			WLog_DBG(TAG, "Early User Auth active: FAILURE code 0x%08" PRIX32 "", code);
+			code = FREERDP_ERROR_AUTHENTICATION_FAILED;
+			freerdp_set_last_error_log(nla->rdpcontext, code);
+			return -1;
 		}
+		else
+			WLog_DBG(TAG, "Early User Auth active: SUCCESS");
+	}
+	else
+	{
+		if (nla_decode_ts_request(nla, s) < 1)
+			return -1;
 
-		freerdp_set_last_error_log(nla->rdpcontext, code);
-		return -1;
+		if (nla->errorCode)
+		{
+			UINT32 code;
+
+			switch (nla->errorCode)
+			{
+				case STATUS_PASSWORD_MUST_CHANGE:
+					code = FREERDP_ERROR_CONNECT_PASSWORD_MUST_CHANGE;
+					break;
+
+				case STATUS_PASSWORD_EXPIRED:
+					code = FREERDP_ERROR_CONNECT_PASSWORD_EXPIRED;
+					break;
+
+				case STATUS_ACCOUNT_DISABLED:
+					code = FREERDP_ERROR_CONNECT_ACCOUNT_DISABLED;
+					break;
+
+				case STATUS_LOGON_FAILURE:
+					code = FREERDP_ERROR_CONNECT_LOGON_FAILURE;
+					break;
+
+				case STATUS_WRONG_PASSWORD:
+					code = FREERDP_ERROR_CONNECT_WRONG_PASSWORD;
+					break;
+
+				case STATUS_ACCESS_DENIED:
+					code = FREERDP_ERROR_CONNECT_ACCESS_DENIED;
+					break;
+
+				case STATUS_ACCOUNT_RESTRICTION:
+					code = FREERDP_ERROR_CONNECT_ACCOUNT_RESTRICTION;
+					break;
+
+				case STATUS_ACCOUNT_LOCKED_OUT:
+					code = FREERDP_ERROR_CONNECT_ACCOUNT_LOCKED_OUT;
+					break;
+
+				case STATUS_ACCOUNT_EXPIRED:
+					code = FREERDP_ERROR_CONNECT_ACCOUNT_EXPIRED;
+					break;
+
+				case STATUS_LOGON_TYPE_NOT_GRANTED:
+					code = FREERDP_ERROR_CONNECT_LOGON_TYPE_NOT_GRANTED;
+					break;
+
+				default:
+					WLog_ERR(TAG, "SPNEGO failed with NTSTATUS: %s [0x%08" PRIX32 "]",
+					         NtStatus2Tag(nla->errorCode), nla->errorCode);
+					code = FREERDP_ERROR_AUTHENTICATION_FAILED;
+					break;
+			}
+
+			freerdp_set_last_error_log(nla->rdpcontext, code);
+			return -1;
+		}
 	}
 
 	return nla_client_recv(nla);
@@ -1658,6 +1780,7 @@ rdpNla* nla_new(rdpContext* context, rdpTransport* transport)
 	nla->sendSeqNum = 0;
 	nla->recvSeqNum = 0;
 	nla->version = 6;
+	nla->earlyUserAuth = FALSE;
 
 	nla->identity = calloc(1, sizeof(SEC_WINNT_AUTH_IDENTITY));
 	if (!nla->identity)
@@ -1761,6 +1884,8 @@ const char* nla_get_state_str(NLA_STATE state)
 			return "NLA_STATE_AUTH_INFO";
 		case NLA_STATE_POST_NEGO:
 			return "NLA_STATE_POST_NEGO";
+		case NLA_STATE_EARLY_USER_AUTH:
+			return "NLA_STATE_EARLY_USER_AUTH";
 		case NLA_STATE_FINAL:
 			return "NLA_STATE_FINAL";
 		default:

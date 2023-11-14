@@ -43,7 +43,7 @@
 
 static char* NTLM_PACKAGE_NAME = "NTLM";
 
-#define check_context(ctx) check_context_((ctx), __FILE__, __FUNCTION__, __LINE__)
+#define check_context(ctx) check_context_((ctx), __FILE__, __func__, __LINE__)
 static BOOL check_context_(NTLM_CONTEXT* context, const char* file, const char* fkt, size_t line)
 {
 	BOOL rc = TRUE;
@@ -169,8 +169,8 @@ static int ntlm_SetContextServicePrincipalNameW(NTLM_CONTEXT* context, LPWSTR Se
 	if (!context->ServicePrincipalName.Buffer)
 		return -1;
 
-	CopyMemory(context->ServicePrincipalName.Buffer, ServicePrincipalName,
-	           context->ServicePrincipalName.Length + 2);
+	memcpy(context->ServicePrincipalName.Buffer, ServicePrincipalName,
+	       context->ServicePrincipalName.Length + 2);
 	return 1;
 }
 

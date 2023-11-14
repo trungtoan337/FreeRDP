@@ -154,7 +154,7 @@ static UINT32 g_ClientId = 0;
 static const WCHAR* rdpdr_read_ustring(wLog* log, wStream* s, size_t bytelen)
 {
 	const size_t charlen = (bytelen + 1) / sizeof(WCHAR);
-	const WCHAR* str = (const WCHAR*)Stream_Pointer(s);
+	const WCHAR* str = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(log, s, bytelen))
 		return NULL;
 	if (_wcsnlen(str, charlen) == charlen)
@@ -181,7 +181,8 @@ static BOOL rdpdr_server_enqueue_irp(RdpdrServerContext* context, RDPDR_IRP* irp
 {
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
-	return ListDictionary_Add(context->priv->IrpList, (void*)(size_t)irp->CompletionId, irp);
+	const uintptr_t key = irp->CompletionId + 1ull;
+	return ListDictionary_Add(context->priv->IrpList, (void*)key, irp);
 }
 
 static RDPDR_IRP* rdpdr_server_dequeue_irp(RdpdrServerContext* context, UINT32 completionId)
@@ -189,7 +190,9 @@ static RDPDR_IRP* rdpdr_server_dequeue_irp(RdpdrServerContext* context, UINT32 c
 	RDPDR_IRP* irp;
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
-	irp = (RDPDR_IRP*)ListDictionary_Remove(context->priv->IrpList, (void*)(size_t)completionId);
+
+	const uintptr_t key = completionId + 1ull;
+	irp = (RDPDR_IRP*)ListDictionary_Take(context->priv->IrpList, (void*)key);
 	return irp;
 }
 
@@ -358,9 +361,8 @@ static UINT rdpdr_server_receive_client_name_request(RdpdrServerContext* context
 		return ERROR_INVALID_DATA;
 
 	/* ComputerName must be null terminated, check if it really is */
-
-	if (Stream_Pointer(s)[ComputerNameLen - 1] ||
-	    (UnicodeFlag && Stream_Pointer(s)[ComputerNameLen - 2]))
+	const char* computerName = Stream_ConstPointer(s);
+	if (computerName[ComputerNameLen - 1] || (UnicodeFlag && computerName[ComputerNameLen - 2]))
 	{
 		WLog_Print(context->priv->log, WLOG_ERROR, "computer name must be null terminated");
 		return ERROR_INVALID_DATA;
@@ -384,7 +386,7 @@ static UINT rdpdr_server_receive_client_name_request(RdpdrServerContext* context
 	}
 	else
 	{
-		const char* name = (const char*)Stream_Pointer(s);
+		const char* name = Stream_ConstPointer(s);
 		context->priv->ClientComputerName = _strdup(name);
 		Stream_Seek(s, ComputerNameLen);
 
@@ -531,7 +533,7 @@ static UINT rdpdr_server_write_general_capability_set(RdpdrServerContext* contex
 	if (error != CHANNEL_RC_OK)
 		return error;
 
-	const BYTE* data = Stream_Pointer(s);
+	const BYTE* data = Stream_ConstPointer(s);
 	const size_t start = Stream_GetPosition(s);
 	Stream_Write_UINT32(s, 0); /* osType (4 bytes), ignored on receipt */
 	Stream_Write_UINT32(s, 0); /* osVersion (4 bytes), unused and must be set to zero */
@@ -823,7 +825,7 @@ static UINT rdpdr_server_receive_core_capability_response(RdpdrServerContext* co
 		}
 
 		status = IFCALLRESULT(CHANNEL_RC_OK, context->ReceiveCaps, context, &capabilityHeader,
-		                      Stream_GetRemainingLength(s), Stream_Pointer(s));
+		                      Stream_GetRemainingLength(s), Stream_ConstPointer(s));
 		if (status != CHANNEL_RC_OK)
 			return status;
 
@@ -1238,7 +1240,6 @@ static UINT rdpdr_server_receive_io_write_request(RdpdrServerContext* context, w
 {
 	UINT32 Length;
 	UINT64 Offset;
-	const BYTE* data;
 
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
@@ -1250,14 +1251,14 @@ static UINT rdpdr_server_receive_io_write_request(RdpdrServerContext* context, w
 	Stream_Read_UINT64(s, Offset);
 	Stream_Seek(s, 20); /* Padding */
 
-	data = Stream_Pointer(s);
+	const BYTE* data = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, Length))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, Length);
 
 	WLog_Print(context->priv->log, WLOG_WARN,
 	           "[MS-RDPEFS] 2.2.1.4.4 Device Write Request (DR_WRITE_REQ) not implemented");
-	WLog_Print(context->priv->log, WLOG_WARN, "TODO");
+	WLog_Print(context->priv->log, WLOG_WARN, "TODO: parse %p", data);
 
 	return CHANNEL_RC_OK;
 }
@@ -1269,7 +1270,6 @@ static UINT rdpdr_server_receive_io_device_control_request(RdpdrServerContext* c
 	UINT32 OutputBufferLength;
 	UINT32 InputBufferLength;
 	UINT32 IoControlCode;
-	const BYTE* InputBuffer;
 
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
@@ -1282,14 +1282,14 @@ static UINT rdpdr_server_receive_io_device_control_request(RdpdrServerContext* c
 	Stream_Read_UINT32(s, IoControlCode);
 	Stream_Seek(s, 20); /* Padding */
 
-	InputBuffer = Stream_Pointer(s);
+	const BYTE* InputBuffer = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, InputBufferLength))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, InputBufferLength);
 
 	WLog_Print(context->priv->log, WLOG_WARN,
 	           "[MS-RDPEFS] 2.2.1.4.5 Device Control Request (DR_CONTROL_REQ) not implemented");
-	WLog_Print(context->priv->log, WLOG_WARN, "TODO");
+	WLog_Print(context->priv->log, WLOG_WARN, "TODO: parse %p", InputBuffer);
 
 	return CHANNEL_RC_OK;
 }
@@ -1301,7 +1301,6 @@ static UINT rdpdr_server_receive_io_query_volume_information_request(RdpdrServer
 {
 	UINT32 FsInformationClass;
 	UINT32 Length;
-	const BYTE* QueryVolumeBuffer;
 
 	WINPR_ASSERT(context);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, 32))
@@ -1311,7 +1310,7 @@ static UINT rdpdr_server_receive_io_query_volume_information_request(RdpdrServer
 	Stream_Read_UINT32(s, Length);
 	Stream_Seek(s, 24); /* Padding */
 
-	QueryVolumeBuffer = Stream_Pointer(s);
+	const BYTE* QueryVolumeBuffer = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, Length))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, Length);
@@ -1319,7 +1318,7 @@ static UINT rdpdr_server_receive_io_query_volume_information_request(RdpdrServer
 	WLog_Print(context->priv->log, WLOG_WARN,
 	           "[MS-RDPEFS] 2.2.3.3.6 Server Drive Query Volume Information Request "
 	           "(DR_DRIVE_QUERY_VOLUME_INFORMATION_REQ) not implemented");
-	WLog_Print(context->priv->log, WLOG_WARN, "TODO");
+	WLog_Print(context->priv->log, WLOG_WARN, "TODO: parse %p", QueryVolumeBuffer);
 
 	return CHANNEL_RC_OK;
 }
@@ -1331,7 +1330,6 @@ static UINT rdpdr_server_receive_io_set_volume_information_request(RdpdrServerCo
 {
 	UINT32 FsInformationClass;
 	UINT32 Length;
-	const BYTE* SetVolumeBuffer;
 
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
@@ -1343,7 +1341,7 @@ static UINT rdpdr_server_receive_io_set_volume_information_request(RdpdrServerCo
 	Stream_Read_UINT32(s, Length);
 	Stream_Seek(s, 24); /* Padding */
 
-	SetVolumeBuffer = Stream_Pointer(s);
+	const BYTE* SetVolumeBuffer = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, Length))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, Length);
@@ -1351,7 +1349,7 @@ static UINT rdpdr_server_receive_io_set_volume_information_request(RdpdrServerCo
 	WLog_Print(context->priv->log, WLOG_WARN,
 	           "[MS-RDPEFS] 2.2.3.3.7 Server Drive Set Volume Information Request "
 	           "(DR_DRIVE_SET_VOLUME_INFORMATION_REQ) not implemented");
-	WLog_Print(context->priv->log, WLOG_WARN, "TODO");
+	WLog_Print(context->priv->log, WLOG_WARN, "TODO: parse %p", SetVolumeBuffer);
 
 	return CHANNEL_RC_OK;
 }
@@ -1362,7 +1360,6 @@ static UINT rdpdr_server_receive_io_query_information_request(RdpdrServerContext
 {
 	UINT32 FsInformationClass;
 	UINT32 Length;
-	const BYTE* QueryBuffer;
 
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
@@ -1374,7 +1371,7 @@ static UINT rdpdr_server_receive_io_query_information_request(RdpdrServerContext
 	Stream_Read_UINT32(s, Length);
 	Stream_Seek(s, 24); /* Padding */
 
-	QueryBuffer = Stream_Pointer(s);
+	const BYTE* QueryBuffer = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, Length))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, Length);
@@ -1382,7 +1379,7 @@ static UINT rdpdr_server_receive_io_query_information_request(RdpdrServerContext
 	WLog_Print(context->priv->log, WLOG_WARN,
 	           "[MS-RDPEFS] 2.2.3.3.8 Server Drive Query Information Request "
 	           "(DR_DRIVE_QUERY_INFORMATION_REQ) not implemented");
-	WLog_Print(context->priv->log, WLOG_WARN, "TODO");
+	WLog_Print(context->priv->log, WLOG_WARN, "TODO: parse %p", QueryBuffer);
 
 	return CHANNEL_RC_OK;
 }
@@ -1393,7 +1390,6 @@ static UINT rdpdr_server_receive_io_set_information_request(RdpdrServerContext* 
 {
 	UINT32 FsInformationClass;
 	UINT32 Length;
-	const BYTE* SetBuffer;
 
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
@@ -1405,7 +1401,7 @@ static UINT rdpdr_server_receive_io_set_information_request(RdpdrServerContext* 
 	Stream_Read_UINT32(s, Length);
 	Stream_Seek(s, 24); /* Padding */
 
-	SetBuffer = Stream_Pointer(s);
+	const BYTE* SetBuffer = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, Length))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, Length);
@@ -1413,7 +1409,7 @@ static UINT rdpdr_server_receive_io_set_information_request(RdpdrServerContext* 
 	WLog_Print(context->priv->log, WLOG_WARN,
 	           "[MS-RDPEFS] 2.2.3.3.9 Server Drive Set Information Request "
 	           "(DR_DRIVE_SET_INFORMATION_REQ) not implemented");
-	WLog_Print(context->priv->log, WLOG_WARN, "TODO");
+	WLog_Print(context->priv->log, WLOG_WARN, "TODO: parse %p", SetBuffer);
 
 	return CHANNEL_RC_OK;
 }
@@ -1697,7 +1693,6 @@ static UINT rdpdr_server_receive_prn_cache_add_printer(RdpdrServerContext* conte
 	const WCHAR* PnPName;
 	const WCHAR* DriverName;
 	const WCHAR* PrinterName;
-	const BYTE* config;
 
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(context->priv);
@@ -1721,7 +1716,6 @@ static UINT rdpdr_server_receive_prn_cache_add_printer(RdpdrServerContext* conte
 	if (!PrinterName && (PrinterNameLen > 0))
 		return ERROR_INVALID_DATA;
 
-	config = Stream_Pointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, CachedFieldsLen))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, CachedFieldsLen);
@@ -1737,7 +1731,6 @@ static UINT rdpdr_server_receive_prn_cache_update_printer(RdpdrServerContext* co
 	UINT32 PrinterNameLen;
 	UINT32 CachedFieldsLen;
 	const WCHAR* PrinterName;
-	const BYTE* config;
 
 	WINPR_ASSERT(context);
 
@@ -1751,7 +1744,7 @@ static UINT rdpdr_server_receive_prn_cache_update_printer(RdpdrServerContext* co
 	if (!PrinterName && (PrinterNameLen > 0))
 		return ERROR_INVALID_DATA;
 
-	config = Stream_Pointer(s);
+	const BYTE* config = Stream_ConstPointer(s);
 	if (!Stream_CheckAndLogRequiredLengthWLog(context->priv->log, s, CachedFieldsLen))
 		return ERROR_INVALID_DATA;
 	Stream_Seek(s, CachedFieldsLen);
@@ -1759,7 +1752,7 @@ static UINT rdpdr_server_receive_prn_cache_update_printer(RdpdrServerContext* co
 	WLog_Print(
 	    context->priv->log, WLOG_WARN,
 	    "[MS-RDPEPC] 2.2.2.4 Update Printer Cachedata (DR_PRN_UPDATE_CACHEDATA) not implemented");
-	WLog_Print(context->priv->log, WLOG_WARN, "TODO");
+	WLog_Print(context->priv->log, WLOG_WARN, "TODO: parse %p", config);
 	return CHANNEL_RC_OK;
 }
 
@@ -3008,7 +3001,7 @@ static UINT rdpdr_server_drive_read_file_callback(RdpdrServerContext* context, w
 
 	if (length > 0)
 	{
-		buffer = (char*)Stream_Pointer(s);
+		buffer = Stream_Pointer(s);
 		Stream_Seek(s, length);
 	}
 

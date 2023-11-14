@@ -64,15 +64,34 @@ enum
 	SDL_USEREVENT_POINTER_DEFAULT,
 	SDL_USEREVENT_POINTER_POSITION,
 	SDL_USEREVENT_POINTER_SET,
-	SDL_USEREVENT_QUIT
+	SDL_USEREVENT_QUIT,
+	SDL_USEREVENT_CERT_DIALOG,
+	SDL_USEREVENT_SHOW_DIALOG,
+	SDL_USEREVENT_AUTH_DIALOG,
+	SDL_USEREVENT_SCARD_DIALOG,
+
+	SDL_USEREVENT_CERT_RESULT,
+	SDL_USEREVENT_SHOW_RESULT,
+	SDL_USEREVENT_AUTH_RESULT,
+	SDL_USEREVENT_SCARD_RESULT
 };
+
+typedef struct
+{
+	Uint32 type;
+	Uint32 timestamp;
+	char* title;
+	char* user;
+	char* domain;
+	char* password;
+	Sint32 result;
+} SDL_UserAuthArg;
 
 BOOL sdl_push_user_event(Uint32 type, ...);
 
 const char* sdl_event_type_str(Uint32 type);
 const char* sdl_error_string(Uint32 res);
 
-#define sdl_log_error(res, log, what) \
-	sdl_log_error_ex(res, log, what, __FILE__, __LINE__, __FUNCTION__)
+#define sdl_log_error(res, log, what) sdl_log_error_ex(res, log, what, __FILE__, __LINE__, __func__)
 BOOL sdl_log_error_ex(Uint32 res, wLog* log, const char* what, const char* file, size_t line,
                       const char* fkt);

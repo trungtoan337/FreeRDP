@@ -20,6 +20,7 @@
 #ifndef WINPR_SSPI_H
 #define WINPR_SSPI_H
 
+#include <winpr/platform.h>
 #include <winpr/winpr.h>
 #include <winpr/wtypes.h>
 #include <winpr/windows.h>
@@ -54,19 +55,15 @@ typedef struct
 typedef SECURITY_INTEGER TimeStamp;
 typedef SECURITY_INTEGER* PTimeStamp;
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wreserved-id-macro"
-#endif
+WINPR_PRAGMA_DIAG_PUSH
+WINPR_PRAGMA_DIAG_IGNORED_RESERVED_ID_MACRO
 
 #ifndef __SECSTATUS_DEFINED__
 typedef LONG SECURITY_STATUS;
 #define __SECSTATUS_DEFINED__
 #endif /* __SECSTATUS_DEFINED__ */
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+WINPR_PRAGMA_DIAG_POP
 
 typedef struct
 {
@@ -462,7 +459,6 @@ typedef struct
 
 #define SECPKG_CRED_ATTR_NAMES 1
 #define SECPKG_CRED_ATTR_SSI_PROVIDER 2
-#define SECPKG_CRED_ATTR_KDC_PROXY_SETTINGS 3
 #define SECPKG_CRED_ATTR_CERT 4
 #define SECPKG_CRED_ATTR_PAC_BYPASS 5
 
@@ -486,14 +482,14 @@ typedef SecPkgCredentials_NamesW* PSecPkgCredentials_NamesW;
 #define PSecPkgCredentials_Names PSecPkgCredentials_NamesA
 #endif
 
-typedef struct _SecPkgCredentials_SSIProviderW
+typedef struct
 {
 	SEC_WCHAR* sProviderName;
 	unsigned long ProviderInfoLength;
 	char* ProviderInfo;
 } SecPkgCredentials_SSIProviderW, *PSecPkgCredentials_SSIProviderW;
 
-typedef struct _SecPkgCredentials_SSIProviderA
+typedef struct
 {
 	SEC_CHAR* sProviderName;
 	unsigned long ProviderInfoLength;
@@ -508,10 +504,22 @@ typedef struct _SecPkgCredentials_SSIProviderA
 #define PSecPkgCredentials_SSIProvider PSecPkgCredentials_SSIProviderA
 #endif
 
+typedef struct _SecPkgCredentials_Cert
+{
+	unsigned long EncodedCertSize;
+	unsigned char* EncodedCert;
+} SecPkgCredentials_Cert, *PSecPkgCredentials_Cert;
+
+#endif /* !defined(_WIN32) || defined(_UWP) */
+
+#if !defined(_WIN32) || defined(_UWP) || (defined(__MINGW32__) && (__MINGW64_VERSION_MAJOR <= 8))
+
+#define SECPKG_CRED_ATTR_KDC_PROXY_SETTINGS 3
+
 #define KDC_PROXY_SETTINGS_V1 1
 #define KDC_PROXY_SETTINGS_FLAGS_FORCEPROXY 0x1
 
-typedef struct _SecPkgCredentials_KdcProxySettingsW
+typedef struct
 {
 	ULONG Version;
 	ULONG Flags;
@@ -521,7 +529,7 @@ typedef struct _SecPkgCredentials_KdcProxySettingsW
 	USHORT ClientTlsCredLength;
 } SecPkgCredentials_KdcProxySettingsW, *PSecPkgCredentials_KdcProxySettingsW;
 
-typedef struct _SecPkgCredentials_KdcProxySettingsA
+typedef struct
 {
 	ULONG Version;
 	ULONG Flags;
@@ -539,15 +547,6 @@ typedef struct _SecPkgCredentials_KdcProxySettingsA
 #define PSecPkgCredentials_KdcProxySettings SecPkgCredentials_KdcProxySettingsA
 #endif
 
-typedef struct _SecPkgCredentials_Cert
-{
-	unsigned long EncodedCertSize;
-	unsigned char* EncodedCert;
-} SecPkgCredentials_Cert, *PSecPkgCredentials_Cert;
-
-#endif /* !defined(_WIN32) || defined(_UWP) */
-
-#if !defined(_WIN32) || defined(_UWP) || (defined(__MINGW32__) && (__MINGW64_VERSION_MAJOR < 8))
 typedef struct
 {
 	UINT32 BindingsLength;
@@ -667,10 +666,8 @@ typedef struct
 
 #if !defined(_WIN32) || defined(_UWP) || defined(__MINGW32__)
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wreserved-id-macro"
-#endif
+WINPR_PRAGMA_DIAG_PUSH
+WINPR_PRAGMA_DIAG_IGNORED_RESERVED_ID_MACRO
 
 #ifndef _AUTH_IDENTITY_DEFINED
 #define _AUTH_IDENTITY_DEFINED
@@ -810,9 +807,7 @@ typedef union _SEC_WINNT_AUTH_IDENTITY_INFO
 
 #endif /* _AUTH_IDENTITY_INFO_DEFINED */
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+WINPR_PRAGMA_DIAG_POP
 
 #if !defined(__MINGW32__)
 typedef struct

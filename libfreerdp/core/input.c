@@ -17,6 +17,7 @@
  * limitations under the License.
  */
 
+#include <time.h>
 #include <freerdp/config.h>
 
 #include <winpr/crt.h>
@@ -37,6 +38,7 @@
 #define INPUT_EVENT_UNICODE 0x0005
 #define INPUT_EVENT_MOUSE 0x8001
 #define INPUT_EVENT_MOUSEX 0x8002
+#define INPUT_EVENT_MOUSEREL 0x8004
 
 #define RDP_CLIENT_INPUT_PDU_HEADER_LENGTH 4
 
@@ -219,6 +221,37 @@ static BOOL input_send_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT
 		return FALSE;
 
 	input_write_mouse_event(s, flags, x, y);
+	return rdp_send_client_input_pdu(rdp, s);
+}
+
+static BOOL input_send_relmouse_event(rdpInput* input, UINT16 flags, INT16 xDelta, INT16 yDelta)
+{
+	wStream* s;
+	rdpRdp* rdp;
+
+	if (!input || !input->context || !input->context->settings)
+		return FALSE;
+
+	rdp = input->context->rdp;
+
+	if (!input_ensure_client_running(input))
+		return FALSE;
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasRelativeMouseEvent))
+	{
+		WLog_ERR(TAG, "Sending relative mouse event, but no support for that");
+		return FALSE;
+	}
+
+	s = rdp_client_input_pdu_init(rdp, INPUT_EVENT_MOUSEREL);
+
+	if (!s)
+		return FALSE;
+
+	Stream_Write_UINT16(s, flags); /* pointerFlags (2 bytes) */
+	Stream_Write_INT16(s, xDelta); /* xDelta (2 bytes) */
+	Stream_Write_INT16(s, yDelta); /* yDelta (2 bytes) */
+
 	return rdp_send_client_input_pdu(rdp, s);
 }
 
@@ -454,6 +487,72 @@ static BOOL input_send_fastpath_extended_mouse_event(rdpInput* input, UINT16 fla
 	return fastpath_send_input_pdu(rdp->fastpath, s);
 }
 
+static BOOL input_send_fastpath_relmouse_event(rdpInput* input, UINT16 flags, UINT16 xDelta,
+                                               UINT16 yDelta)
+{
+	wStream* s;
+	rdpRdp* rdp;
+
+	WINPR_ASSERT(input);
+	WINPR_ASSERT(input->context);
+	WINPR_ASSERT(input->context->settings);
+
+	rdp = input->context->rdp;
+	WINPR_ASSERT(rdp);
+
+	if (!input_ensure_client_running(input))
+		return FALSE;
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasRelativeMouseEvent))
+	{
+		WLog_ERR(TAG, "Sending relative fastpath mouse event, but no support for that announced");
+		return FALSE;
+	}
+
+	s = fastpath_input_pdu_init(rdp->fastpath, 0, TS_FP_RELPOINTER_EVENT);
+
+	if (!s)
+		return FALSE;
+
+	Stream_Write_UINT16(s, flags); /* pointerFlags (2 bytes) */
+	Stream_Write_INT16(s, xDelta); /* xDelta (2 bytes) */
+	Stream_Write_INT16(s, yDelta); /* yDelta (2 bytes) */
+	return fastpath_send_input_pdu(rdp->fastpath, s);
+}
+
+static BOOL input_send_fastpath_qoe_event(rdpInput* input, UINT32 timestampMS)
+{
+	WINPR_ASSERT(input);
+	WINPR_ASSERT(input->context);
+	WINPR_ASSERT(input->context->settings);
+
+	rdpRdp* rdp = input->context->rdp;
+	WINPR_ASSERT(rdp);
+
+	if (!input_ensure_client_running(input))
+		return FALSE;
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasQoeEvent))
+	{
+		WLog_ERR(TAG, "Sending qoe event, but no support for that announced");
+		return FALSE;
+	}
+
+	wStream* s = fastpath_input_pdu_init(rdp->fastpath, 0, TS_FP_QOETIMESTAMP_EVENT);
+
+	if (!s)
+		return FALSE;
+
+	if (!Stream_EnsureRemainingCapacity(s, 4))
+	{
+		Stream_Free(s, TRUE);
+		return FALSE;
+	}
+
+	Stream_Write_UINT32(s, timestampMS);
+	return fastpath_send_input_pdu(rdp->fastpath, s);
+}
+
 static BOOL input_send_fastpath_focus_in_event(rdpInput* input, UINT16 toggleStates)
 {
 	wStream* s;
@@ -607,6 +706,33 @@ static BOOL input_recv_mouse_event(rdpInput* input, wStream* s)
 	return IFCALLRESULT(TRUE, input->MouseEvent, input, pointerFlags, xPos, yPos);
 }
 
+static BOOL input_recv_relmouse_event(rdpInput* input, wStream* s)
+{
+	UINT16 pointerFlags;
+	INT16 xDelta, yDelta;
+
+	WINPR_ASSERT(input);
+	WINPR_ASSERT(s);
+
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 6))
+		return FALSE;
+
+	Stream_Read_UINT16(s, pointerFlags); /* pointerFlags (2 bytes) */
+	Stream_Read_INT16(s, xDelta);        /* xPos (2 bytes) */
+	Stream_Read_INT16(s, yDelta);        /* yPos (2 bytes) */
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasRelativeMouseEvent))
+	{
+		WLog_ERR(TAG,
+		         "Received relative mouse event(flags=0x%04" PRIx16 ", xPos=%" PRId16
+		         ", yPos=%" PRId16 "), but we did not announce support for that",
+		         pointerFlags, xDelta, yDelta);
+		return FALSE;
+	}
+
+	return IFCALLRESULT(TRUE, input->RelMouseEvent, input, pointerFlags, xDelta, yDelta);
+}
+
 static BOOL input_recv_extended_mouse_event(rdpInput* input, wStream* s)
 {
 	UINT16 pointerFlags, xPos, yPos;
@@ -620,6 +746,16 @@ static BOOL input_recv_extended_mouse_event(rdpInput* input, wStream* s)
 	Stream_Read_UINT16(s, pointerFlags); /* pointerFlags (2 bytes) */
 	Stream_Read_UINT16(s, xPos);         /* xPos (2 bytes) */
 	Stream_Read_UINT16(s, yPos);         /* yPos (2 bytes) */
+
+	if (!freerdp_settings_get_bool(input->context->settings, FreeRDP_HasExtendedMouseEvent))
+	{
+		WLog_ERR(TAG,
+		         "Received extended mouse event(flags=0x%04" PRIx16 ", xPos=%" PRIu16
+		         ", yPos=%" PRIu16 "), but we did not announce support for that",
+		         pointerFlags, xPos, yPos);
+		return FALSE;
+	}
+
 	return IFCALLRESULT(TRUE, input->ExtendedMouseEvent, input, pointerFlags, xPos, yPos);
 }
 
@@ -664,6 +800,12 @@ static BOOL input_recv_event(rdpInput* input, wStream* s)
 
 		case INPUT_EVENT_MOUSEX:
 			if (!input_recv_extended_mouse_event(input, s))
+				return FALSE;
+
+			break;
+
+		case INPUT_EVENT_MOUSEREL:
+			if (!input_recv_relmouse_event(input, s))
 				return FALSE;
 
 			break;
@@ -723,8 +865,10 @@ BOOL input_register_client_callbacks(rdpInput* input)
 		input->KeyboardPauseEvent = input_send_fastpath_keyboard_pause_event;
 		input->UnicodeKeyboardEvent = input_send_fastpath_unicode_keyboard_event;
 		input->MouseEvent = input_send_fastpath_mouse_event;
+		input->RelMouseEvent = input_send_fastpath_relmouse_event;
 		input->ExtendedMouseEvent = input_send_fastpath_extended_mouse_event;
 		input->FocusInEvent = input_send_fastpath_focus_in_event;
+		input->QoEEvent = input_send_fastpath_qoe_event;
 	}
 	else
 	{
@@ -733,10 +877,33 @@ BOOL input_register_client_callbacks(rdpInput* input)
 		input->KeyboardPauseEvent = input_send_keyboard_pause_event;
 		input->UnicodeKeyboardEvent = input_send_unicode_keyboard_event;
 		input->MouseEvent = input_send_mouse_event;
+		input->RelMouseEvent = input_send_relmouse_event;
 		input->ExtendedMouseEvent = input_send_extended_mouse_event;
 		input->FocusInEvent = input_send_focus_in_event;
 	}
 
+	return TRUE;
+}
+
+/* Save last input timestamp and/or mouse position in prevent-session-lock mode */
+static BOOL input_update_last_event(rdpInput* input, BOOL mouse, UINT16 x, UINT16 y)
+{
+	rdp_input_internal* in = input_cast(input);
+
+	WINPR_ASSERT(input);
+	WINPR_ASSERT(input->context);
+
+	if (freerdp_settings_get_uint32(input->context->settings, FreeRDP_FakeMouseMotionInterval) > 0)
+	{
+		const time_t now = time(NULL);
+		in->lastInputTimestamp = now;
+
+		if (mouse)
+		{
+			in->lastX = x;
+			in->lastY = y;
+		}
+	}
 	return TRUE;
 }
 
@@ -758,6 +925,8 @@ BOOL freerdp_input_send_keyboard_event(rdpInput* input, UINT16 flags, UINT8 code
 
 	if (freerdp_settings_get_bool(input->context->settings, FreeRDP_SuspendInput))
 		return TRUE;
+
+	input_update_last_event(input, FALSE, 0, 0);
 
 	return IFCALLRESULT(TRUE, input->KeyboardEvent, input, flags, code);
 }
@@ -782,6 +951,8 @@ BOOL freerdp_input_send_unicode_keyboard_event(rdpInput* input, UINT16 flags, UI
 	if (freerdp_settings_get_bool(input->context->settings, FreeRDP_SuspendInput))
 		return TRUE;
 
+	input_update_last_event(input, FALSE, 0, 0);
+
 	return IFCALLRESULT(TRUE, input->UnicodeKeyboardEvent, input, flags, code);
 }
 
@@ -793,7 +964,30 @@ BOOL freerdp_input_send_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UIN
 	if (freerdp_settings_get_bool(input->context->settings, FreeRDP_SuspendInput))
 		return TRUE;
 
+	input_update_last_event(
+	    input, flags & (PTR_FLAGS_MOVE | PTR_FLAGS_BUTTON1 | PTR_FLAGS_BUTTON2 | PTR_FLAGS_BUTTON3),
+	    x, y);
+
 	return IFCALLRESULT(TRUE, input->MouseEvent, input, flags, x, y);
+}
+
+BOOL freerdp_input_send_rel_mouse_event(rdpInput* input, UINT16 flags, INT16 xDelta, INT16 yDelta)
+{
+	if (!input || !input->context)
+		return FALSE;
+
+	if (freerdp_settings_get_bool(input->context->settings, FreeRDP_SuspendInput))
+		return TRUE;
+
+	return IFCALLRESULT(TRUE, input->RelMouseEvent, input, flags, xDelta, yDelta);
+}
+
+BOOL freerdp_input_send_qoe_timestamp(rdpInput* input, UINT32 timestampMS)
+{
+	if (!input || !input->context)
+		return FALSE;
+
+	return IFCALLRESULT(TRUE, input->QoEEvent, input, timestampMS);
 }
 
 BOOL freerdp_input_send_extended_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y)
@@ -803,6 +997,8 @@ BOOL freerdp_input_send_extended_mouse_event(rdpInput* input, UINT16 flags, UINT
 
 	if (freerdp_settings_get_bool(input->context->settings, FreeRDP_SuspendInput))
 		return TRUE;
+
+	input_update_last_event(input, TRUE, x, y);
 
 	return IFCALLRESULT(TRUE, input->ExtendedMouseEvent, input, flags, x, y);
 }

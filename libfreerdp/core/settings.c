@@ -29,6 +29,7 @@
 #include <winpr/path.h>
 #include <winpr/sysinfo.h>
 #include <winpr/registry.h>
+#include <winpr/wtsapi.h>
 
 #include <freerdp/settings.h>
 #include <freerdp/build-config.h>
@@ -340,6 +341,8 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 {
 	char* base;
 	char* issuers[] = { "FreeRDP", "FreeRDP-licenser" };
+	const BOOL server = (flags & FREERDP_SETTINGS_SERVER_MODE) != 0 ? TRUE : FALSE;
+	const BOOL remote = (flags & FREERDP_SETTINGS_REMOTE_MODE) != 0 ? TRUE : FALSE;
 	rdpSettings* settings = (rdpSettings*)calloc(1, sizeof(rdpSettings));
 
 	if (!settings)
@@ -366,6 +369,8 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!freerdp_settings_set_bool(settings, FreeRDP_UnicodeInput, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_HasHorizontalWheel, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_HasExtendedMouseEvent, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_HasQoeEvent, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_HasRelativeMouseEvent, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_HiDefRemoteApp, TRUE) ||
 	    !freerdp_settings_set_uint32(
 	        settings, FreeRDP_RemoteApplicationSupportMask,
@@ -379,8 +384,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	                                 NEGOTIATE_ORDER_SUPPORT | ZERO_BOUNDS_DELTA_SUPPORT |
 	                                     COLOR_INDEX_SUPPORT) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_SupportHeartbeatPdu, TRUE) ||
-	    !freerdp_settings_set_bool(settings, FreeRDP_ServerMode,
-	                               (flags & FREERDP_SETTINGS_SERVER_MODE) ? TRUE : FALSE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_ServerMode, server) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_WaitForOutputBufferFlush, TRUE) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_ClusterInfoFlags, REDIRECTION_SUPPORTED) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, 1024) ||
@@ -389,7 +393,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	    !freerdp_settings_set_bool(settings, FreeRDP_Fullscreen, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GrabKeyboard, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_Decorations, TRUE) ||
-	    !freerdp_settings_set_uint32(settings, FreeRDP_RdpVersion, RDP_VERSION_10_11) ||
+	    !freerdp_settings_set_uint32(settings, FreeRDP_RdpVersion, RDP_VERSION_10_12) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_AadSecurity, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE) ||
@@ -625,11 +629,12 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	    !freerdp_settings_set_uint32(settings, FreeRDP_RemoteAppNumIconCaches, 3) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_RemoteAppNumIconCacheEntries, 12) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_VirtualChannelChunkSize,
-	                                 CHANNEL_CHUNK_LENGTH) ||
+	                                 (server && !remote) ? CHANNEL_CHUNK_MAX_LENGTH
+	                                                     : CHANNEL_CHUNK_LENGTH) ||
 	    /* [MS-RDPBCGR] 2.2.7.2.7 Large Pointer Capability Set (TS_LARGE_POINTER_CAPABILITYSET)
 	       requires at least this size */
 	    !freerdp_settings_set_uint32(settings, FreeRDP_MultifragMaxRequestSize,
-	                                 (flags & FREERDP_SETTINGS_SERVER_MODE) ? 0 : 608299) ||
+	                                 server ? 0 : 608299) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayUseSameCredentials, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayBypassLocal, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayRpcTransport, TRUE) ||
@@ -637,6 +642,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayUdpTransport, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayHttpUseWebsockets, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayHttpExtAuthSspiNtlm, FALSE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayArmTransport, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_FastPathInput, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_FastPathOutput, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_LongCredentialsSupported, TRUE) ||
@@ -647,7 +653,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	    !freerdp_settings_set_bool(settings, FreeRDP_NSCodecAllowDynamicColorFidelity, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_AutoReconnectionEnabled, FALSE) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_AutoReconnectMaxRetries, 20) ||
-	    !freerdp_settings_set_bool(settings, FreeRDP_GfxThinClient, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GfxThinClient, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxSmallCache, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, FALSE) ||
@@ -738,7 +744,6 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 
 	settings_load_hkey_local_machine(settings);
 
-	settings->XSelectionAtom = NULL;
 	if (!freerdp_settings_set_string(settings, FreeRDP_ActionScript, "~/.config/freerdp/action.sh"))
 		goto out_fail;
 	if (!freerdp_settings_set_bool(settings, FreeRDP_SmartcardLogon, FALSE))
@@ -787,9 +792,6 @@ static void freerdp_settings_free_internal(rdpSettings* settings)
 	freerdp_dynamic_channel_collection_free(settings);
 
 	freerdp_capability_buffer_free(settings);
-	/* Extensions */
-	free(settings->XSelectionAtom);
-	settings->XSelectionAtom = NULL;
 
 	/* Free all strings, set other pointers NULL */
 	freerdp_settings_free_keys(settings, TRUE);
@@ -1011,9 +1013,9 @@ static BOOL freerdp_settings_int_buffer_copy(rdpSettings* _settings, const rdpSe
 
 		if (len < count)
 			goto out_fail;
-		if (!freerdp_settings_set_uint32(_settings, FreeRDP_DeviceCount, count))
-			goto out_fail;
 		if (!freerdp_settings_set_pointer_len(_settings, FreeRDP_DeviceArray, NULL, len))
+			goto out_fail;
+		if (!freerdp_settings_set_uint32(_settings, FreeRDP_DeviceCount, count))
 			goto out_fail;
 
 		for (index = 0; index < count; index++)
@@ -1030,9 +1032,9 @@ static BOOL freerdp_settings_int_buffer_copy(rdpSettings* _settings, const rdpSe
 
 		if (len < count)
 			goto out_fail;
-		if (!freerdp_settings_set_uint32(_settings, FreeRDP_StaticChannelCount, count))
-			goto out_fail;
 		if (!freerdp_settings_set_pointer_len(_settings, FreeRDP_StaticChannelArray, NULL, len))
+			goto out_fail;
+		if (!freerdp_settings_set_uint32(_settings, FreeRDP_StaticChannelCount, count))
 			goto out_fail;
 
 		for (index = 0; index < count; index++)
@@ -1050,11 +1052,9 @@ static BOOL freerdp_settings_int_buffer_copy(rdpSettings* _settings, const rdpSe
 
 		if (len < count)
 			goto out_fail;
-		if (!freerdp_settings_set_uint32(_settings, FreeRDP_DynamicChannelCount, count))
-			goto out_fail;
-		if (!freerdp_settings_set_uint32(_settings, FreeRDP_DynamicChannelCount, count))
-			goto out_fail;
 		if (!freerdp_settings_set_pointer_len(_settings, FreeRDP_DynamicChannelArray, NULL, len))
+			goto out_fail;
+		if (!freerdp_settings_set_uint32(_settings, FreeRDP_DynamicChannelCount, count))
 			goto out_fail;
 
 		for (index = 0; index < count; index++)
@@ -1069,9 +1069,6 @@ static BOOL freerdp_settings_int_buffer_copy(rdpSettings* _settings, const rdpSe
 
 	rc = freerdp_settings_set_string(_settings, FreeRDP_ActionScript,
 	                                 freerdp_settings_get_string(settings, FreeRDP_ActionScript));
-
-	if (settings->XSelectionAtom)
-		_settings->XSelectionAtom = _strdup(settings->XSelectionAtom);
 
 out_fail:
 	return rc;
@@ -1119,7 +1116,6 @@ BOOL freerdp_settings_copy(rdpSettings* _settings, const rdpSettings* settings)
 	_settings->ServerLicenseProductIssuersCount = 0;
 	_settings->ServerLicenseProductIssuers = NULL;
 
-	_settings->XSelectionAtom = NULL;
 	if (!rc)
 		goto out_fail;
 

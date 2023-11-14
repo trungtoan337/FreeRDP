@@ -2,6 +2,7 @@
 #include <winpr/print.h>
 #include <winpr/ssl.h>
 #include <winpr/wlog.h>
+#include <winpr/platform.h>
 
 #include <freerdp/assistance.h>
 
@@ -21,16 +22,12 @@ static const char TEST_MSRC_INCIDENT_FILE_TYPE1[] =
     "L=\"0\" />"
     "</UPLOADINFO>";
 
-#if __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-const-variable"
-#endif
+WINPR_PRAGMA_DIAG_PUSH
+WINPR_PRAGMA_DIAG_IGNORED_UNUSED_CONST_VAR
 static const BYTE TEST_MSRC_INCIDENT_EXPERT_BLOB_TYPE1[32] =
     "\x3C\x9C\xAE\x0B\xCE\x7A\xB1\x5C\x8A\xAC\x01\xD6\x76\x04\x5E\xDF"
     "\x3F\xFA\xF0\x92\xE2\xDE\x36\x8A\x20\x17\xE6\x8A\x0D\xED\x7C\x90";
-#if __GNUC__
-#pragma GCC diagnostic pop
-#endif
+WINPR_PRAGMA_DIAG_POP
 
 static const char TEST_MSRC_INCIDENT_PASSWORD_TYPE2[] = "48BJQ853X3B4";
 
@@ -80,6 +77,40 @@ static const char TEST_MSRC_INCIDENT_FILE_TYPE2[] =
  * </C>
  * </E>
  */
+static const char connectionstr2[] =
+    "<E>\n"
+    "<A KH=\"YiKwWUY8Ioq5NB3wAQHSbs5kwrM=\"\n"
+    "KH2=\"sha256:wKSAkAV3sBfa9WpuRFJcP9q1twJc6wOBuoJ9tsyXwpk=\"\n"
+    "ID=\"8rYm30RBW8/4dAWoUsWbFCF5jno/7jr5tNpHQc2goLbw4uuBBJvLsU02YYLlBMg5\"/>\n"
+    "<C>\n"
+    "<T ID=\"1\" SID=\"1440550163\">\n"
+    "<L P=\"49749\" N=\"2001:4898:1a:5:79e2:3356:9b22:3470\"/>\n"
+    "<L P=\"49751\" N=\"172.31.250.64\"/>\n"
+    "</T>\n"
+    "</C>\n"
+    "</E>";
+
+static const char* fail_tests[] = {
+	"<UPLOADINFOTYPE=\"Escalated\"><UPLOADDATARCTICKET=\"65538,1, ,*,,*,*,\"/></UPLOADINFO>",
+	"<UPLOADINFO>(E><UPLOADDATA  "
+	"FOTYPE=\"Escalated\"æÁATAPassStub=\"␕:&A&amp;␅RCTICKET=\"65538,1,ü,*,n,*,*,\"am␡/>␂</"
+	"UPLOADINFO>"
+};
+
+static BOOL run_test_parse(wLog* log, const char* input, size_t len, const char* password,
+                           BOOL expect)
+{
+	rdpAssistanceFile* file = freerdp_assistance_file_new();
+	if (!file)
+		return FALSE;
+
+	const int status = freerdp_assistance_parse_file_buffer(file, input, len, password);
+	const BOOL success = status >= 0;
+
+	freerdp_assistance_print_file(file, log, WLOG_INFO);
+	freerdp_assistance_file_free(file);
+	return success == expect;
+}
 
 static BOOL test_msrsc_incident_file_type1(wLog* log)
 {
@@ -137,6 +168,13 @@ static BOOL test_msrsc_incident_file_type2(wLog* log)
 	if (!file)
 		return -1;
 
+	status = freerdp_assistance_parse_file_buffer(file, connectionstr2, sizeof(connectionstr2),
+	                                              TEST_MSRC_INCIDENT_PASSWORD_TYPE2);
+	printf("freerdp_assistance_parse_file_buffer: %d\n", status);
+
+	if (status < 0)
+		goto fail;
+
 	status = freerdp_assistance_parse_file_buffer(file, TEST_MSRC_INCIDENT_FILE_TYPE2,
 	                                              sizeof(TEST_MSRC_INCIDENT_FILE_TYPE2),
 	                                              TEST_MSRC_INCIDENT_PASSWORD_TYPE2);
@@ -173,8 +211,17 @@ int TestCommonAssistance(int argc, char* argv[])
 	wLog* log;
 	WINPR_UNUSED(argc);
 	WINPR_UNUSED(argv);
-	log = WLog_Get(__FUNCTION__);
+	log = WLog_Get(__func__);
 	winpr_InitializeSSL(WINPR_SSL_INIT_DEFAULT);
+
+	for (size_t x = 0; x < ARRAYSIZE(fail_tests); x++)
+	{
+		const char* test = fail_tests[x];
+		const size_t len = strlen(test);
+
+		if (!run_test_parse(log, test, len + 1, NULL, FALSE))
+			return -1;
+	}
 
 	if (!test_msrsc_incident_file_type1(log))
 	{

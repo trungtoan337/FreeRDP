@@ -601,7 +601,8 @@ out_fail:
 	free(fullpath);
 	return ret;
 #else
-	return 1;
+	WLog_ERR(TAG, "%s only supported with OpenSSL", __func__);
+	return -1;
 #endif
 }
 
@@ -682,7 +683,8 @@ out_fail:
 	free(fullpath);
 	return ret;
 #else
-	return 1;
+	WLog_ERR(TAG, "%s only supported with OpenSSL", __func__);
+	return -1;
 #endif
 }
 
@@ -735,7 +737,8 @@ static BOOL makecert_create_rsa(EVP_PKEY** ppkey, size_t key_length)
 	if (EVP_PKEY_keygen_init(pctx) != 1)
 		goto fail;
 
-	const unsigned int keylen = key_length;
+	WINPR_ASSERT(key_length <= UINT_MAX);
+	unsigned int keylen = (unsigned int)key_length;
 	const OSSL_PARAM params[] = { OSSL_PARAM_construct_uint("bits", &keylen),
 		                          OSSL_PARAM_construct_end() };
 	if (EVP_PKEY_CTX_set_params(pctx, params) != 1)
@@ -1121,8 +1124,11 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 		}
 	}
 
-#endif
 	return 0;
+#else
+	WLog_ERR(TAG, "%s only supported with OpenSSL", __func__);
+	return -1;
+#endif
 }
 
 MAKECERT_CONTEXT* makecert_context_new(void)

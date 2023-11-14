@@ -67,6 +67,12 @@ extern "C"
 
 	FREERDP_API BOOL cliprdr_file_context_clear(CliprdrFileContext* file);
 
+	FREERDP_API UINT
+	cliprdr_file_context_notify_new_server_format_list(CliprdrFileContext* file_context);
+
+	FREERDP_API UINT
+	cliprdr_file_context_notify_new_client_format_list(CliprdrFileContext* file_context);
+
 	/** \brief updates the files the client announces to the server
 	 *
 	 * \param file the file context to update
@@ -80,8 +86,9 @@ extern "C"
 	/** \brief updates the files the server announces to the client
 	 *
 	 * \param file the file context to update
+	 * \param clip the clipboard instance to use
 	 * \param data the file list [MS-RDPECLIP] 2.2.5.2.3 Packed File List (CLIPRDR_FILELIST)
-	 * \param count the length of the file list
+	 * \param size the length of the file list
 	 *
 	 * \return \b TRUE for success, \b FALSE otherwise
 	 */

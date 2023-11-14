@@ -112,6 +112,10 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	{ "cert-tofu", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
 	  "[DEPRECATED, use /cert:tofu] Automatically accept certificate on first connect" },
 #endif
+#ifdef _WIN32
+	{ "connect-child-session", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, "",
+	  "connect to child session (win32)" },
+#endif
 	{ "client-build-number", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
 	  "Client Build Number sent to server (influences smartcard behaviour, see [MS-RDPESC])" },
 	{ "client-hostname", COMMAND_LINE_VALUE_REQUIRED, "<name>", NULL, NULL, -1, NULL,
@@ -163,6 +167,8 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	  "floatbar is disabled by default (when enabled defaults to sticky in fullscreen mode)" },
 	{ "fonts", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
 	  "smooth fonts (ClearType)" },
+	{ "force-console-callbacks", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL,
+	  "Use default callbacks (console) for certificate/credential/..." },
 	{ "frame-ack", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
 	  "Number of frame acknowledgement" },
 	{ "args-from", COMMAND_LINE_VALUE_REQUIRED, "<file>|stdin|fd:<number>|env:<name>", NULL, NULL,
@@ -177,7 +183,7 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	  "g:<gateway>[:<port>],u:<user>,d:<domain>,p:<password>,usage-method:["
 	  "direct|detect],access-token:<"
 	  "token>,type:[rpc|http[,no-websockets][,extauth-sspi-ntlm]|auto[,no-websockets][,extauth-"
-	  "sspi-ntlm]],",
+	  "sspi-ntlm]]|arm,url:<wss://url>,bearer:<oauth2-bearer-token>",
 	  NULL, NULL, -1, "gw", "Gateway Hostname" },
 #if defined(WITH_FREERDP_DEPRECATED_COMMANDLINE)
 	{ "g", COMMAND_LINE_VALUE_REQUIRED, "<gateway>[:<port>]", NULL, NULL, -1, NULL,
@@ -248,12 +254,13 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 #endif
 	{ "kbd", COMMAND_LINE_VALUE_REQUIRED,
 	  "[layout:[0x<id>|<name>],lang:<0x<id>>,fn-key:<value>,type:<value>,subtype:<value>,unicode[:"
-	  "on|off],remap:<key1>=<value1>,remap:<key2>=<value2>]",
+	  "on|off],remap:<key1>=<value1>,remap:<key2>=<value2>,pipe:<filename>]",
 	  NULL, NULL, -1, NULL,
 	  "Keyboard related options:"
 	  "* layout: set the keybouard layout announced to the server"
 	  "* lang: set the keyboard language identifier sent to the server"
-	  "* fn-key: Function key value" },
+	  "* fn-key: Function key value"
+	  "* pipe: Name of a named pipe that can be used to type text into the RDP session" },
 #if defined(WITH_FREERDP_DEPRECATED_COMMANDLINE)
 	{ "kbd-lang", COMMAND_LINE_VALUE_REQUIRED, "0x<id>", NULL, NULL, -1, NULL,
 	  "[DEPRECATED, use / kbd:lang:<value>] Keyboard active language identifier" },
@@ -284,8 +291,11 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	{ "load-balance-info", COMMAND_LINE_VALUE_REQUIRED, "<info-string>", NULL, NULL, -1, NULL,
 	  "Load balance info" },
 	{ "list", COMMAND_LINE_VALUE_REQUIRED | COMMAND_LINE_PRINT,
-	  "[kbd|kbd-scancode|kbd-lang|smartcard|monitor|tune]", "List available options for subcommand",
-	  NULL, -1, NULL, "List available options for subcommand" },
+	  "[kbd|kbd-scancode|kbd-lang[:<value>]|smartcard[:[pkinit-anchors:<path>][,pkcs11-module:<"
+	  "name>]]|"
+	  "monitor|tune]",
+	  "List available options for subcommand", NULL, -1, NULL,
+	  "List available options for subcommand" },
 	{ "log-filters", COMMAND_LINE_VALUE_REQUIRED, "<tag>:<level>[,<tag>:<level>[,...]]", NULL, NULL,
 	  -1, NULL, "Set logger filters, see wLog(7) for details" },
 	{ "log-level", COMMAND_LINE_VALUE_REQUIRED, "[OFF|FATAL|ERROR|WARN|INFO|DEBUG|TRACE]", NULL,
@@ -309,8 +319,13 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	  "Select monitors to use" },
 	{ "mouse-motion", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
 	  "Send mouse motion" },
-	{ "mouse-relative", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
+	{ "mouse-relative", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL,
 	  "Send mouse motion with relative addressing" },
+	{ "mouse", COMMAND_LINE_VALUE_REQUIRED, "[relative:[on|off],grab:[on|off]]", NULL, NULL, -1,
+	  NULL,
+	  "Mouse related options:"
+	  "* relative:   send relative mouse movements if supported by server"
+	  "* grab:       grab the mouse if within the window" },
 #if defined(CHANNEL_TSMF_CLIENT)
 	{ "multimedia", COMMAND_LINE_VALUE_OPTIONAL, "[sys:<sys>,][dev:<dev>,][decoder:<decoder>]",
 	  NULL, NULL, -1, "mmr", "[DEPRECATED], use /video] Redirect multimedia (video)" },
@@ -424,6 +439,8 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	  "SSH Agent forwarding channel" },
 	{ "sspi-module", COMMAND_LINE_VALUE_REQUIRED, "<SSPI module path>", NULL, NULL, -1, NULL,
 	  "SSPI shared library module file path" },
+	{ "winscard-module", COMMAND_LINE_VALUE_REQUIRED, "<WinSCard module path>", NULL, NULL, -1,
+	  NULL, "WinSCard shared library module file path" },
 	{ "disable-output", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
 	  "Deactivate all graphics decoding in the client session. Useful for load tests with many "
 	  "simultaneous connections" },
@@ -481,6 +498,9 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	  "Print version" },
 	{ "video", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
 	  "Video optimized remoting channel" },
+	{ "prevent-session-lock", COMMAND_LINE_VALUE_OPTIONAL, "<time in sec>", NULL, NULL, -1, NULL,
+	  "Prevent session locking by injecting fake mouse motion events to the server "
+	  "when the connection is idle (default interval: 180 seconds)" },
 	{ "vmconnect", COMMAND_LINE_VALUE_OPTIONAL, "<vmid>", NULL, NULL, -1, NULL,
 	  "Hyper-V console (use port 2179, disable negotiation)" },
 	{ "w", COMMAND_LINE_VALUE_REQUIRED, "<width>", "1024", NULL, -1, NULL, "Width" },

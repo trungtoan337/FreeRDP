@@ -112,8 +112,8 @@ static const scancode_entry_t map[] = {
 	ENTRY(SDL_SCANCODE_NUMLOCKCLEAR, RDP_SCANCODE_NUMLOCK),
 	ENTRY(SDL_SCANCODE_KP_DIVIDE, RDP_SCANCODE_DIVIDE),
 	ENTRY(SDL_SCANCODE_KP_MULTIPLY, RDP_SCANCODE_MULTIPLY),
-	ENTRY(SDL_SCANCODE_KP_MINUS, RDP_SCANCODE_OEM_MINUS),
-	ENTRY(SDL_SCANCODE_KP_PLUS, RDP_SCANCODE_OEM_PLUS),
+	ENTRY(SDL_SCANCODE_KP_MINUS, RDP_SCANCODE_SUBTRACT),
+	ENTRY(SDL_SCANCODE_KP_PLUS, RDP_SCANCODE_ADD),
 	ENTRY(SDL_SCANCODE_KP_ENTER, RDP_SCANCODE_RETURN_KP),
 	ENTRY(SDL_SCANCODE_KP_1, RDP_SCANCODE_NUMPAD1),
 	ENTRY(SDL_SCANCODE_KP_2, RDP_SCANCODE_NUMPAD2),
@@ -173,7 +173,7 @@ static const scancode_entry_t map[] = {
 	ENTRY(SDL_SCANCODE_APOSTROPHE, RDP_SCANCODE_OEM_7),
 	ENTRY(SDL_SCANCODE_NONUSBACKSLASH, RDP_SCANCODE_OEM_102),
 	ENTRY(SDL_SCANCODE_SLEEP, RDP_SCANCODE_SLEEP),
-	ENTRY(SDL_SCANCODE_EQUALS, VK_OEM_8),
+	ENTRY(SDL_SCANCODE_EQUALS, RDP_SCANCODE_OEM_PLUS),
 	ENTRY(SDL_SCANCODE_KP_COMMA, RDP_SCANCODE_DECIMAL),
 	ENTRY(SDL_SCANCODE_FIND, RDP_SCANCODE_BROWSER_SEARCH),
 	ENTRY(SDL_SCANCODE_RETURN2, RDP_SCANCODE_RETURN_KP),
@@ -339,7 +339,7 @@ BOOL sdlInput::keyboard_focus_in()
 	return TRUE;
 }
 
-/* This function is called to update the keyboard indocator LED */
+/* This function is called to update the keyboard indicator LED */
 BOOL sdlInput::keyboard_set_indicators(rdpContext* context, UINT16 led_flags)
 {
 	WINPR_UNUSED(context);
@@ -430,28 +430,25 @@ BOOL sdlInput::keyboard_handle_event(const SDL_KeyboardEvent* ev)
 	const SDL_Keymod mask = KMOD_RSHIFT;
 	if ((mods & mask) == mask)
 	{
-		switch (ev->keysym.scancode)
+		if (ev->type == SDL_KEYDOWN)
 		{
-			case SDL_SCANCODE_RETURN:
-				if (ev->type == SDL_KEYDOWN)
-				{
+			switch (ev->keysym.scancode)
+			{
+				case SDL_SCANCODE_RETURN:
 					_sdl->update_fullscreen(!_sdl->fullscreen);
-				}
-				return TRUE;
-			case SDL_SCANCODE_R:
-				if (ev->type == SDL_KEYDOWN)
-				{
+					return TRUE;
+				case SDL_SCANCODE_R:
 					_sdl->update_resizeable(!_sdl->resizeable);
-				}
-				return TRUE;
-			case SDL_SCANCODE_G:
-				if (ev->type == SDL_KEYDOWN)
-				{
+					return TRUE;
+				case SDL_SCANCODE_G:
 					keyboard_grab(ev->windowID, _sdl->grab_kbd ? SDL_FALSE : SDL_TRUE);
-				}
-				return TRUE;
-			default:
-				break;
+					return TRUE;
+				case SDL_SCANCODE_D:
+					freerdp_abort_connect_context(_sdl->context());
+					return true;
+				default:
+					break;
+			}
 		}
 	}
 	return freerdp_input_send_keyboard_event_ex(_sdl->context()->input, ev->type == SDL_KEYDOWN,
@@ -473,6 +470,20 @@ BOOL sdlInput::keyboard_grab(Uint32 windowID, SDL_bool enable)
 #endif
 }
 
+BOOL sdlInput::mouse_focus(Uint32 windowID)
+{
+	if (_lastWindowID != windowID)
+	{
+		_lastWindowID = windowID;
+		SDL_Window* window = SDL_GetWindowFromID(windowID);
+		if (!window)
+			return FALSE;
+
+		SDL_RaiseWindow(window);
+	}
+	return TRUE;
+}
+
 BOOL sdlInput::mouse_grab(Uint32 windowID, SDL_bool enable)
 {
 	SDL_Window* window = SDL_GetWindowFromID(windowID);
@@ -489,7 +500,7 @@ BOOL sdlInput::mouse_grab(Uint32 windowID, SDL_bool enable)
 #endif
 }
 
-sdlInput::sdlInput(SdlContext* sdl) : _sdl(sdl)
+sdlInput::sdlInput(SdlContext* sdl) : _sdl(sdl), _lastWindowID(UINT32_MAX)
 {
 	WINPR_ASSERT(_sdl);
 }

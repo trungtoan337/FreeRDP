@@ -22,6 +22,7 @@
 #include <freerdp/log.h>
 
 #include <winpr/crt.h>
+#include <winpr/wtypes.h>
 #include <winpr/assert.h>
 #include <winpr/print.h>
 #include <winpr/synch.h>
@@ -286,7 +287,8 @@ static int rpc_client_recv_pdu(rdpRpc* rpc, RPC_PDU* pdu)
 						WLog_ERR(TAG, "rpc_secure_bind: error sending rpc_auth_3 pdu!");
 						return -1;
 					}
-					/* FALLTHROUGH */
+					/* fallthrough */
+					WINPR_FALLTHROUGH
 				case RPC_BIND_STATE_COMPLETE:
 					rpc_client_transition_to_state(rpc, RPC_CLIENT_STATE_CONTEXT_NEGOTIATED);
 
@@ -417,7 +419,7 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 				goto fail;
 
 			Stream_SetPosition(fragment, StubOffset);
-			Stream_Write(pdu->s, Stream_Pointer(fragment), StubLength);
+			Stream_Write(pdu->s, Stream_ConstPointer(fragment), StubLength);
 			rpc->StubFragCount++;
 
 			if (response->alloc_hint == StubLength)
@@ -439,7 +441,7 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 			if (Stream_Length(fragment) < StubOffset + StubLength)
 				goto fail;
 			Stream_SetPosition(fragment, StubOffset);
-			rpc_client_receive_pipe_write(rpc->client, Stream_Pointer(fragment),
+			rpc_client_receive_pipe_write(rpc->client, Stream_ConstPointer(fragment),
 			                              (size_t)StubLength);
 			rpc->StubFragCount++;
 
@@ -602,16 +604,12 @@ static SSIZE_T rpc_client_default_out_channel_recv(rdpRpc* rpc)
 
 		if (statusCode != HTTP_STATUS_OK)
 		{
-			char buffer[64] = { 0 };
-
-			WLog_ERR(TAG, "error! Status Code: %s",
-			         http_status_string_format(statusCode, buffer, ARRAYSIZE(buffer)));
-			http_response_print(response);
+			http_response_log_error_status(WLog_Get(TAG), WLOG_ERROR, response);
 
 			if (statusCode == HTTP_STATUS_DENIED)
 			{
 				rdpContext* context = transport_get_context(rpc->transport);
-				freerdp_set_last_error_if_not(context, FREERDP_ERROR_AUTHENTICATION_FAILED);
+				freerdp_set_last_error_if_not(context, FREERDP_ERROR_CONNECT_ACCESS_DENIED);
 			}
 
 			http_response_free(response);

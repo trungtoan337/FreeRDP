@@ -679,8 +679,6 @@ DWORD fixKeyCode(DWORD keyCode, unichar keyChar, enum APPLE_KEYBOARD_TYPE type)
 
 - (void)onPasteboardTimerFired:(NSTimer *)timer
 {
-	const void *data;
-	UINT32 size;
 	UINT32 formatId;
 	BOOL formatMatch;
 	int changeCount;
@@ -721,9 +719,9 @@ DWORD fixKeyCode(DWORD keyCode, unichar keyChar, enum APPLE_KEYBOARD_TYPE type)
 
 			formatString = [[NSString alloc] initWithData:formatData encoding:NSUTF8StringEncoding];
 
-			size = strlen([formatString UTF8String]) + 1;
-			data = [formatString UTF8String];
-			formatId = ClipboardRegisterFormat(mfc->clipboard, "UTF8_STRING");
+			const char *data = [formatString UTF8String];
+			const size_t size = strlen(data) + 1;
+			formatId = ClipboardRegisterFormat(mfc->clipboard, "text/plain");
 			ClipboardSetData(mfc->clipboard, formatId, data, size);
 			[formatString release];
 
@@ -926,12 +924,17 @@ void mac_post_disconnect(freerdp *instance)
 	gdi_free(instance);
 }
 
-static BOOL mac_authenticate_int(NSString *title, freerdp *instance, char **username,
-                                 char **password, char **domain)
+static BOOL mac_show_auth_dialog(MRDPView *view, NSString *title, char **username, char **password,
+                                 char **domain)
 {
-	mfContext *mfc = (mfContext *)instance->context;
-	MRDPView *view = (MRDPView *)mfc->view;
+	WINPR_ASSERT(view);
+	WINPR_ASSERT(title);
+	WINPR_ASSERT(username);
+	WINPR_ASSERT(password);
+	WINPR_ASSERT(domain);
+
 	PasswordDialog *dialog = [PasswordDialog new];
+
 	dialog.serverHostname = title;
 
 	if (*username)
@@ -982,40 +985,108 @@ static BOOL mac_authenticate_int(NSString *title, freerdp *instance, char **user
 	return ok;
 }
 
-BOOL mac_authenticate(freerdp *instance, char **username, char **password, char **domain)
+static BOOL mac_authenticate_raw(freerdp *instance, char **username, char **password, char **domain,
+                                 rdp_auth_reason reason)
 {
-	rdpSettings *settings;
+	BOOL pinOnly = FALSE;
 
 	WINPR_ASSERT(instance);
 	WINPR_ASSERT(instance->context);
+	WINPR_ASSERT(instance->context->settings);
 
-	settings = instance->context->settings;
-	WINPR_ASSERT(settings);
+	const rdpSettings *settings = instance->context->settings;
+	mfContext *mfc = (mfContext *)instance->context;
+	MRDPView *view = (MRDPView *)mfc->view;
+	NSString *title = NULL;
 
-	NSString *title =
-	    [NSString stringWithFormat:@"%@:%u",
-	                               [NSString stringWithCString:settings->ServerHostname
-	                                                  encoding:NSUTF8StringEncoding],
-	                               settings -> ServerPort];
-	return mac_authenticate_int(title, instance, username, password, domain);
+	switch (reason)
+	{
+		case AUTH_SMARTCARD_PIN:
+			pinOnly = TRUE;
+			title = [NSString stringWithFormat:@"%@:%u",
+			                                   [NSString stringWithCString:settings->ServerHostname
+			                                                      encoding:NSUTF8StringEncoding],
+			                                   settings -> ServerPort];
+			break;
+		case AUTH_TLS:
+		case AUTH_RDP:
+		case AUTH_NLA:
+			title = [NSString stringWithFormat:@"%@:%u",
+			                                   [NSString stringWithCString:settings->ServerHostname
+			                                                      encoding:NSUTF8StringEncoding],
+			                                   settings -> ServerPort];
+			break;
+		case GW_AUTH_HTTP:
+		case GW_AUTH_RDG:
+		case GW_AUTH_RPC:
+			title = [NSString stringWithFormat:@"%@:%u",
+			                                   [NSString stringWithCString:settings->GatewayHostname
+			                                                      encoding:NSUTF8StringEncoding],
+			                                   settings -> GatewayPort];
+			break;
+		default:
+			return FALSE;
+	}
+
+	if (!username || !password || !domain)
+		return FALSE;
+
+	if (!*username && !pinOnly)
+	{
+		if (!mac_show_auth_dialog(view, title, username, password, domain))
+			goto fail;
+	}
+	else if (!*domain && !pinOnly)
+	{
+		if (!mac_show_auth_dialog(view, title, username, password, domain))
+			goto fail;
+	}
+	else if (!*password)
+	{
+		if (!mac_show_auth_dialog(view, title, username, password, domain))
+			goto fail;
+	}
+
+	return TRUE;
+fail:
+	free(*username);
+	free(*domain);
+	free(*password);
+	*username = NULL;
+	*domain = NULL;
+	*password = NULL;
+	return FALSE;
 }
 
-BOOL mac_gw_authenticate(freerdp *instance, char **username, char **password, char **domain)
+BOOL mac_authenticate_ex(freerdp *instance, char **username, char **password, char **domain,
+                         rdp_auth_reason reason)
 {
-	rdpSettings *settings;
-
 	WINPR_ASSERT(instance);
-	WINPR_ASSERT(instance->context);
+	WINPR_ASSERT(username);
+	WINPR_ASSERT(password);
+	WINPR_ASSERT(domain);
 
-	settings = instance->context->settings;
-	WINPR_ASSERT(settings);
+	NSString *title;
+	switch (reason)
+	{
+		case AUTH_NLA:
+			break;
 
-	NSString *title =
-	    [NSString stringWithFormat:@"%@:%u",
-	                               [NSString stringWithCString:settings->GatewayHostname
-	                                                  encoding:NSUTF8StringEncoding],
-	                               settings -> GatewayPort];
-	return mac_authenticate_int(title, instance, username, password, domain);
+		case AUTH_TLS:
+		case AUTH_RDP:
+		case AUTH_SMARTCARD_PIN: /* in this case password is pin code */
+			if ((*username) && (*password))
+				return TRUE;
+			break;
+		case GW_AUTH_HTTP:
+		case GW_AUTH_RDG:
+		case GW_AUTH_RPC:
+			break;
+		default:
+			return FALSE;
+	}
+
+	return mac_authenticate_raw(instance, username, password, domain, reason);
 }
 
 DWORD mac_verify_certificate_ex(freerdp *instance, const char *host, UINT16 port,
@@ -1026,7 +1097,7 @@ DWORD mac_verify_certificate_ex(freerdp *instance, const char *host, UINT16 port
 	MRDPView *view = (MRDPView *)mfc->view;
 	CertificateDialog *dialog = [CertificateDialog new];
 	const char *type = "RDP-Server";
-	char hostname[8192];
+	char hostname[8192] = { 0 };
 
 	if (flags & VERIFY_CERT_FLAG_GATEWAY)
 		type = "RDP-Gateway";

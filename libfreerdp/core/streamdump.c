@@ -53,7 +53,7 @@ static UINT32 crc32b(const BYTE* data, size_t length)
 		crc = crc ^ d;
 		for (int j = 7; j >= 0; j--)
 		{
-			UINT32 mask = -(crc & 1);
+			UINT32 mask = ~(crc & 1);
 			crc = (crc >> 1) ^ (0xEDB88320 & mask);
 		}
 	}
@@ -100,7 +100,7 @@ static
 	r = fread(Stream_Pointer(s), 1, size, fp);
 	if (r != size)
 		goto fail;
-	if (crc32 != crc32b(Stream_Pointer(s), size))
+	if (crc32 != crc32b(Stream_ConstPointer(s), size))
 		goto fail;
 	Stream_Seek(s, size);
 
@@ -355,7 +355,15 @@ static int stream_dump_replay_transport_read(rdpTransport* transport, wStream* s
 	WLog_ERR("abc", "replay read %" PRIuz, size);
 
 	if (slp > 0)
-		Sleep(slp);
+	{
+		size_t duration = slp;
+		do
+		{
+			const DWORD actual = (DWORD)MIN(duration, UINT32_MAX);
+			Sleep(actual);
+			duration -= actual;
+		} while (duration > 0);
+	}
 
 	return 1;
 }

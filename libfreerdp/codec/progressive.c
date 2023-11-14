@@ -36,6 +36,7 @@
 #include "rfx_quantization.h"
 #include "rfx_dwt.h"
 #include "rfx_rlgr.h"
+#include "rfx_constants.h"
 #include "rfx_types.h"
 #include "progressive.h"
 
@@ -53,42 +54,6 @@ typedef struct
 	int nz;
 	BOOL mode;
 } RFX_PROGRESSIVE_UPGRADE_STATE;
-
-static INLINE BOOL progressive_write_tile_simple(PROGRESSIVE_CONTEXT* progressive, wStream* s,
-                                                 const RFX_TILE* tile);
-
-static const char* progressive_get_block_type_string(UINT16 blockType)
-{
-	switch (blockType)
-	{
-		case PROGRESSIVE_WBT_SYNC:
-			return "PROGRESSIVE_WBT_SYNC";
-
-		case PROGRESSIVE_WBT_FRAME_BEGIN:
-			return "PROGRESSIVE_WBT_FRAME_BEGIN";
-
-		case PROGRESSIVE_WBT_FRAME_END:
-			return "PROGRESSIVE_WBT_FRAME_END";
-
-		case PROGRESSIVE_WBT_CONTEXT:
-			return "PROGRESSIVE_WBT_CONTEXT";
-
-		case PROGRESSIVE_WBT_REGION:
-			return "PROGRESSIVE_WBT_REGION";
-
-		case PROGRESSIVE_WBT_TILE_SIMPLE:
-			return "PROGRESSIVE_WBT_TILE_SIMPLE";
-
-		case PROGRESSIVE_WBT_TILE_FIRST:
-			return "PROGRESSIVE_WBT_TILE_FIRST";
-
-		case PROGRESSIVE_WBT_TILE_UPGRADE:
-			return "PROGRESSIVE_WBT_TILE_UPGRADE";
-
-		default:
-			return "PROGRESSIVE_WBT_UNKNOWN";
-	}
-}
 
 static INLINE void progressive_component_codec_quant_read(wStream* s,
                                                           RFX_COMPONENT_CODEC_QUANT* quantVal)
@@ -418,7 +383,7 @@ static INLINE RFX_PROGRESSIVE_TILE* progressive_tile_new(void)
 	tile->height = 64;
 	tile->stride = 4 * tile->width;
 
-	size_t dataLen = tile->stride * tile->height * 1ULL;
+	size_t dataLen = 1ull * tile->stride * tile->height;
 	tile->data = (BYTE*)winpr_aligned_malloc(dataLen, 16);
 	if (!tile->data)
 		goto fail;
@@ -835,24 +800,41 @@ static INLINE void progressive_rfx_dwt_2d_decode_block(INT16* buffer, INT16* tem
 	                       nBandL + nBandH);
 }
 
+void rfx_dwt_2d_extrapolate_decode(INT16* buffer, INT16* temp)
+{
+	WINPR_ASSERT(buffer);
+	WINPR_ASSERT(temp);
+	progressive_rfx_dwt_2d_decode_block(&buffer[3807], temp, 3);
+	progressive_rfx_dwt_2d_decode_block(&buffer[3007], temp, 2);
+	progressive_rfx_dwt_2d_decode_block(&buffer[0], temp, 1);
+}
+
 static INLINE int progressive_rfx_dwt_2d_decode(PROGRESSIVE_CONTEXT* progressive, INT16* buffer,
                                                 INT16* current, BOOL coeffDiff, BOOL extrapolate,
                                                 BOOL reverse)
 {
 	const primitives_t* prims = primitives_get();
-	INT16* temp;
 
 	if (!progressive || !buffer || !current)
 		return -1;
 
-	if (coeffDiff)
-		prims->add_16s(buffer, current, buffer, 4096);
-
+	INT16 dst[4096] = { 0 };
 	if (reverse)
-		CopyMemory(buffer, current, 4096 * 2);
+		memcpy(buffer, current, sizeof(dst));
 	else
-		CopyMemory(current, buffer, 4096 * 2);
-	temp = (INT16*)BufferPool_Take(progressive->bufferPool, -1); /* DWT buffer */
+	{
+		if (coeffDiff)
+		{
+			prims->add_16s(buffer, current, dst, ARRAYSIZE(dst));
+			memcpy(current, dst, sizeof(dst));
+			memcpy(buffer, dst, sizeof(dst));
+		}
+		else
+			memcpy(current, buffer, sizeof(dst));
+	}
+
+	INT16* temp = (INT16*)BufferPool_Take(progressive->bufferPool, -1); /* DWT buffer */
+
 	if (!temp)
 		return -2;
 
@@ -862,9 +844,8 @@ static INLINE int progressive_rfx_dwt_2d_decode(PROGRESSIVE_CONTEXT* progressive
 	}
 	else
 	{
-		progressive_rfx_dwt_2d_decode_block(&buffer[3807], temp, 3);
-		progressive_rfx_dwt_2d_decode_block(&buffer[3007], temp, 2);
-		progressive_rfx_dwt_2d_decode_block(&buffer[0], temp, 1);
+		WINPR_ASSERT(progressive->rfx_context->dwt_2d_extrapolate_decode);
+		progressive->rfx_context->dwt_2d_extrapolate_decode(buffer, temp);
 	}
 	BufferPool_Return(progressive->bufferPool, temp);
 	return 1;
@@ -1671,7 +1652,7 @@ static void CALLBACK progressive_process_tiles_tile_work_callback(PTP_CALLBACK_I
 		default:
 			WLog_Print(param->progressive->log, WLOG_ERROR, "Invalid block type %04" PRIx16 " (%s)",
 			           param->tile->blockType,
-			           progressive_get_block_type_string(param->tile->blockType));
+			           rfx_get_progressive_block_type_string(param->tile->blockType));
 			break;
 	}
 }
@@ -1708,7 +1689,7 @@ static INLINE SSIZE_T progressive_process_tiles(PROGRESSIVE_CONTEXT* progressive
 
 #if defined(WITH_DEBUG_CODECS)
 		WLog_Print(progressive->log, WLOG_DEBUG, "%s",
-		           progressive_get_block_type_string(blockType));
+		           rfx_get_progressive_block_type_string(blockType));
 #endif
 
 		if (blockLen < 6)
@@ -1740,8 +1721,8 @@ static INLINE SSIZE_T progressive_process_tiles(PROGRESSIVE_CONTEXT* progressive
 					return -1032;
 				break;
 			default:
-				WLog_ERR(TAG, "Invalid block type %04 (%s)" PRIx16, blockType,
-				         progressive_get_block_type_string(blockType));
+				WLog_ERR(TAG, "Invalid block type %04" PRIx16 " (%s)", blockType,
+				         rfx_get_progressive_block_type_string(blockType));
 				return -1039;
 		}
 
@@ -1818,7 +1799,7 @@ static INLINE SSIZE_T progressive_process_tiles(PROGRESSIVE_CONTEXT* progressive
 		if (status < 0)
 		{
 			WLog_Print(progressive->log, WLOG_ERROR, "Failed to decompress %s at %" PRIu16,
-			           progressive_get_block_type_string(tile->blockType), index);
+			           rfx_get_progressive_block_type_string(tile->blockType), index);
 			goto fail;
 		}
 	}
@@ -1844,181 +1825,6 @@ fail:
 		return -1;
 
 	return (SSIZE_T)(end - start);
-}
-
-static INLINE BOOL progressive_write_wb_sync(PROGRESSIVE_CONTEXT* progressive, wStream* s)
-{
-	const UINT32 blockLen = 12;
-	WINPR_ASSERT(progressive);
-	WINPR_ASSERT(s);
-
-	if (!Stream_EnsureRemainingCapacity(s, blockLen))
-		return FALSE;
-
-	Stream_Write_UINT16(s, PROGRESSIVE_WBT_SYNC); /* blockType (2 bytes) */
-	Stream_Write_UINT32(s, blockLen);             /* blockLen (4 bytes) */
-	Stream_Write_UINT32(s, 0xCACCACCA);           /* magic (4 bytes) */
-	Stream_Write_UINT16(s, 0x0100);               /* version (2 bytes) */
-	return TRUE;
-}
-
-static INLINE BOOL progressive_write_wb_context(PROGRESSIVE_CONTEXT* progressive, wStream* s)
-{
-	const UINT32 blockLen = 10;
-	WINPR_ASSERT(progressive);
-	WINPR_ASSERT(s);
-
-	if (!Stream_EnsureRemainingCapacity(s, blockLen))
-		return FALSE;
-
-	Stream_Write_UINT16(s, PROGRESSIVE_WBT_CONTEXT); /* blockType (2 bytes) */
-	Stream_Write_UINT32(s, blockLen);                /* blockLen (4 bytes) */
-	Stream_Write_UINT8(s, 0);                        /* ctxId (1 byte) */
-	Stream_Write_UINT16(s, 64);                      /* tileSize (2 bytes) */
-	Stream_Write_UINT8(s, 0);                        /* flags (1 byte) */
-	return TRUE;
-}
-
-static INLINE BOOL progressive_write_region(PROGRESSIVE_CONTEXT* progressive, wStream* s,
-                                            const RFX_MESSAGE* msg)
-{
-	/* RFX_PROGRESSIVE_REGION */
-	UINT32 blockLen = 18;
-	UINT32 tilesDataSize = 0;
-	const size_t start = Stream_GetPosition(s);
-
-	WINPR_ASSERT(progressive);
-	WINPR_ASSERT(s);
-	WINPR_ASSERT(msg);
-
-	blockLen += msg->numRects * 8;
-	blockLen += msg->numQuant * 5;
-	tilesDataSize = msg->numTiles * 22UL;
-	for (UINT16 i = 0; i < msg->numTiles; i++)
-	{
-		const RFX_TILE* tile = msg->tiles[i];
-		WINPR_ASSERT(tile);
-		tilesDataSize += tile->YLen + tile->CbLen + tile->CrLen;
-	}
-	blockLen += tilesDataSize;
-
-	if (!Stream_EnsureRemainingCapacity(s, blockLen))
-		return FALSE;
-
-	Stream_Write_UINT16(s, PROGRESSIVE_WBT_REGION); /* blockType (2 bytes) */
-	Stream_Write_UINT32(s, blockLen);               /* blockLen (4 bytes) */
-	Stream_Write_UINT8(s, 64);                      /* tileSize (1 byte) */
-	Stream_Write_UINT16(s, msg->numRects);          /* numRects (2 bytes) */
-	Stream_Write_UINT8(s, msg->numQuant);           /* numQuant (1 byte) */
-	Stream_Write_UINT8(s, 0);                       /* numProgQuant (1 byte) */
-	Stream_Write_UINT8(s, 0);                       /* flags (1 byte) */
-	Stream_Write_UINT16(s, msg->numTiles);          /* numTiles (2 bytes) */
-	Stream_Write_UINT32(s, tilesDataSize);          /* tilesDataSize (4 bytes) */
-
-	for (UINT16 i = 0; i < msg->numRects; i++)
-	{
-		/* TS_RFX_RECT */
-		const RFX_RECT* r = &msg->rects[i];
-		Stream_Write_UINT16(s, r->x);      /* x (2 bytes) */
-		Stream_Write_UINT16(s, r->y);      /* y (2 bytes) */
-		Stream_Write_UINT16(s, r->width);  /* width (2 bytes) */
-		Stream_Write_UINT16(s, r->height); /* height (2 bytes) */
-	}
-
-	/**
-	 * Note: The RFX_COMPONENT_CODEC_QUANT structure differs from the
-	 * TS_RFX_CODEC_QUANT ([MS-RDPRFX] section 2.2.2.1.5) structure with respect
-	 * to the order of the bands.
-	 *             0    1    2   3     4    5    6    7    8    9
-	 * RDPRFX:   LL3, LH3, HL3, HH3, LH2, HL2, HH2, LH1, HL1, HH1
-	 * RDPEGFX:  LL3, HL3, LH3, HH3, HL2, LH2, HH2, HL1, LH1, HH1
-	 */
-	for (UINT16 i = 0; i < msg->numQuant; i++)
-	{
-		const UINT32* qv = &msg->quantVals[i * 10];
-		/* RFX_COMPONENT_CODEC_QUANT */
-		Stream_Write_UINT8(s, (UINT8)(qv[0] + (qv[2] << 4))); /* LL3 (4-bit), HL3 (4-bit) */
-		Stream_Write_UINT8(s, (UINT8)(qv[1] + (qv[3] << 4))); /* LH3 (4-bit), HH3 (4-bit) */
-		Stream_Write_UINT8(s, (UINT8)(qv[5] + (qv[4] << 4))); /* HL2 (4-bit), LH2 (4-bit) */
-		Stream_Write_UINT8(s, (UINT8)(qv[6] + (qv[8] << 4))); /* HH2 (4-bit), HL1 (4-bit) */
-		Stream_Write_UINT8(s, (UINT8)(qv[7] + (qv[9] << 4))); /* LH1 (4-bit), HH1 (4-bit) */
-	}
-
-	for (UINT16 i = 0; i < msg->numTiles; i++)
-	{
-		const RFX_TILE* tile = msg->tiles[i];
-		if (!progressive_write_tile_simple(progressive, s, tile))
-			return FALSE;
-	}
-
-	const size_t end = Stream_GetPosition(s);
-	const size_t used = end - start;
-	return (used == blockLen);
-}
-
-static INLINE BOOL progressive_write_frame_begin(PROGRESSIVE_CONTEXT* progressive, wStream* s,
-                                                 const RFX_MESSAGE* msg)
-{
-	const UINT32 blockLen = 12;
-	WINPR_ASSERT(progressive);
-	WINPR_ASSERT(s);
-	WINPR_ASSERT(msg);
-
-	if (!Stream_EnsureRemainingCapacity(s, blockLen))
-		return FALSE;
-
-	Stream_Write_UINT16(s, PROGRESSIVE_WBT_FRAME_BEGIN); /* blockType (2 bytes) */
-	Stream_Write_UINT32(s, blockLen);                    /* blockLen (4 bytes) */
-	Stream_Write_UINT32(s, msg->frameIdx);               /* frameIndex (4 bytes) */
-	Stream_Write_UINT16(s, 1);                           /* regionCount (2 bytes) */
-
-	return TRUE;
-}
-
-static INLINE BOOL progressive_write_frame_end(PROGRESSIVE_CONTEXT* progressive, wStream* s)
-{
-	const UINT32 blockLen = 6;
-	WINPR_ASSERT(progressive);
-	WINPR_ASSERT(s);
-
-	if (!Stream_EnsureRemainingCapacity(s, blockLen))
-		return FALSE;
-
-	Stream_Write_UINT16(s, PROGRESSIVE_WBT_FRAME_END); /* blockType (2 bytes) */
-	Stream_Write_UINT32(s, blockLen);                  /* blockLen (4 bytes) */
-
-	return TRUE;
-}
-
-INLINE BOOL progressive_write_tile_simple(PROGRESSIVE_CONTEXT* progressive, wStream* s,
-                                          const RFX_TILE* tile)
-{
-	UINT32 blockLen;
-	WINPR_ASSERT(progressive);
-	WINPR_ASSERT(s);
-	WINPR_ASSERT(tile);
-
-	blockLen = 22 + tile->YLen + tile->CbLen + tile->CrLen;
-	if (!Stream_EnsureRemainingCapacity(s, blockLen))
-		return FALSE;
-
-	Stream_Write_UINT16(s, PROGRESSIVE_WBT_TILE_SIMPLE); /* blockType (2 bytes) */
-	Stream_Write_UINT32(s, blockLen);                    /* blockLen (4 bytes) */
-	Stream_Write_UINT8(s, tile->quantIdxY);              /* quantIdxY (1 byte) */
-	Stream_Write_UINT8(s, tile->quantIdxCb);             /* quantIdxCb (1 byte) */
-	Stream_Write_UINT8(s, tile->quantIdxCr);             /* quantIdxCr (1 byte) */
-	Stream_Write_UINT16(s, tile->xIdx);                  /* xIdx (2 bytes) */
-	Stream_Write_UINT16(s, tile->yIdx);                  /* yIdx (2 bytes) */
-	Stream_Write_UINT8(s, 0);                            /* flags (1 byte) */
-	Stream_Write_UINT16(s, tile->YLen);                  /* YLen (2 bytes) */
-	Stream_Write_UINT16(s, tile->CbLen);                 /* CbLen (2 bytes) */
-	Stream_Write_UINT16(s, tile->CrLen);                 /* CrLen (2 bytes) */
-	Stream_Write_UINT16(s, 0);                           /* tailLen (2 bytes) */
-	Stream_Write(s, tile->YData, tile->YLen);            /* YData */
-	Stream_Write(s, tile->CbData, tile->CbLen);          /* CbData */
-	Stream_Write(s, tile->CrData, tile->CrLen);          /* CrData */
-
-	return TRUE;
 }
 
 static INLINE SSIZE_T progressive_wb_sync(PROGRESSIVE_CONTEXT* progressive, wStream* s,
@@ -2274,7 +2080,7 @@ static INLINE SSIZE_T progressive_wb_read_region_header(PROGRESSIVE_CONTEXT* pro
 	}
 	len -= region->numProgQuant * 16ULL;
 
-	if (len < region->tileDataSize)
+	if (len < region->tileDataSize * 1ll)
 	{
 		WLog_Print(progressive->log, WLOG_ERROR, "ProgressiveRegion data short for region->tiles");
 		return -1024;
@@ -2307,10 +2113,10 @@ static INLINE SSIZE_T progressive_wb_skip_region(PROGRESSIVE_CONTEXT* progressiv
 	return rc;
 }
 
-static INLINE INT32 progressive_wb_region(PROGRESSIVE_CONTEXT* progressive, wStream* s,
-                                          UINT16 blockType, UINT32 blockLen,
-                                          PROGRESSIVE_SURFACE_CONTEXT* surface,
-                                          PROGRESSIVE_BLOCK_REGION* region)
+static INLINE SSIZE_T progressive_wb_region(PROGRESSIVE_CONTEXT* progressive, wStream* s,
+                                            UINT16 blockType, UINT32 blockLen,
+                                            PROGRESSIVE_SURFACE_CONTEXT* surface,
+                                            PROGRESSIVE_BLOCK_REGION* region)
 {
 	SSIZE_T rc = -1;
 	UINT16 boxLeft;
@@ -2424,7 +2230,7 @@ static INLINE INT32 progressive_wb_region(PROGRESSIVE_CONTEXT* progressive, wStr
 	const SSIZE_T res = progressive_process_tiles(progressive, s, region, surface, context);
 	if (res < 0)
 		return -1;
-	return rc;
+	return (size_t)rc;
 }
 
 static SSIZE_T progressive_parse_block(PROGRESSIVE_CONTEXT* progressive, wStream* s,
@@ -2597,11 +2403,17 @@ INT32 progressive_decompress(PROGRESSIVE_CONTEXT* progressive, const BYTE* pSrcD
 		for (UINT32 j = 0; j < nbUpdateRects; j++)
 		{
 			const RECTANGLE_16* rect = &updateRects[j];
-			const UINT32 nXSrc = rect->left - (nXDst + tile->x);
-			const UINT32 nYSrc = rect->top - (nYDst + tile->y);
+			if (rect->left < updateRect.left)
+				goto fail;
+			const UINT32 nXSrc = rect->left - updateRect.left;
+			const UINT32 nYSrc = rect->top - updateRect.top;
 			const UINT32 width = rect->right - rect->left;
 			const UINT32 height = rect->bottom - rect->top;
 
+			if (rect->left + width > surface->width)
+				goto fail;
+			if (rect->top + height > surface->height)
+				goto fail;
 			if (!freerdp_image_copy(pDstData, DstFormat, nDstStep, rect->left, rect->top, width,
 			                        height, tile->data, progressive->format, tile->stride, nXSrc,
 			                        nYSrc, NULL, FREERDP_KEEP_DST_ALPHA))
@@ -2624,8 +2436,8 @@ fail:
 	return rc;
 }
 
-static BOOL progressive_rfx_write_message_progressive_simple(PROGRESSIVE_CONTEXT* progressive,
-                                                             wStream* s, const RFX_MESSAGE* msg)
+BOOL progressive_rfx_write_message_progressive_simple(PROGRESSIVE_CONTEXT* progressive, wStream* s,
+                                                      const RFX_MESSAGE* msg)
 {
 	RFX_CONTEXT* context;
 
@@ -2633,29 +2445,7 @@ static BOOL progressive_rfx_write_message_progressive_simple(PROGRESSIVE_CONTEXT
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(msg);
 	context = progressive->rfx_context;
-	WINPR_ASSERT(context);
-	if (context->mode != RLGR1)
-	{
-		WLog_ERR(TAG, "error, RLGR1 mode is required!");
-		return FALSE;
-	}
-
-	if (!progressive_write_wb_sync(progressive, s))
-		return FALSE;
-
-	if (!progressive_write_wb_context(progressive, s))
-		return FALSE;
-
-	if (!progressive_write_frame_begin(progressive, s, msg))
-		return FALSE;
-
-	if (!progressive_write_region(progressive, s, msg))
-		return FALSE;
-
-	if (!progressive_write_frame_end(progressive, s))
-		return FALSE;
-
-	return TRUE;
+	return rfx_write_message_progressive_simple(context, s, msg);
 }
 
 int progressive_compress(PROGRESSIVE_CONTEXT* progressive, const BYTE* pSrcData, UINT32 SrcSize,
@@ -2771,7 +2561,9 @@ int progressive_compress(PROGRESSIVE_CONTEXT* progressive, const BYTE* pSrcData,
 	if (!rc)
 		goto fail;
 
-	*pDstSize = Stream_GetPosition(s);
+	const size_t pos = Stream_GetPosition(s);
+	WINPR_ASSERT(pos <= UINT32_MAX);
+	*pDstSize = (UINT32)pos;
 	*ppDstData = Stream_Buffer(s);
 	res = 1;
 fail:

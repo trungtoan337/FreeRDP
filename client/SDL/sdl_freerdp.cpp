@@ -44,6 +44,7 @@
 #include <freerdp/log.h>
 
 #include <SDL.h>
+#include <SDL_hints.h>
 #include <SDL_video.h>
 
 #include "sdl_channels.hpp"
@@ -54,10 +55,9 @@
 #include "sdl_kbd.hpp"
 #include "sdl_touch.hpp"
 #include "sdl_pointer.hpp"
+#include "dialogs/sdl_dialogs.hpp"
 
-#ifdef WITH_WEBVIEW
-#include "sdl_webview.hpp"
-#endif
+#include "aad/sdl_webview.hpp"
 
 #define SDL_TAG CLIENT_TAG("SDL")
 
@@ -324,6 +324,114 @@ class SdlEventUpdateTriggerGuard
 	}
 };
 
+static BOOL sdl_draw_to_window_rect(SdlContext* sdl, SDL_Surface* screen, SDL_Surface* surface,
+                                    SDL_Point offset, const SDL_Rect& srcRect)
+{
+	SDL_Rect dstRect = { offset.x + srcRect.x, offset.y + srcRect.y, srcRect.w, srcRect.h };
+	SDL_SetClipRect(surface, &srcRect);
+	SDL_SetClipRect(screen, &dstRect);
+	SDL_BlitSurface(surface, &srcRect, screen, &dstRect);
+	return TRUE;
+}
+
+static BOOL sdl_draw_to_window_rect(SdlContext* sdl, SDL_Surface* screen, SDL_Surface* surface,
+                                    SDL_Point offset, const std::vector<SDL_Rect>& rects = {})
+{
+	if (rects.empty())
+	{
+		return sdl_draw_to_window_rect(sdl, screen, surface, offset,
+		                               { 0, 0, surface->w, surface->h });
+	}
+	for (auto& srcRect : rects)
+	{
+		if (!sdl_draw_to_window_rect(sdl, screen, surface, offset, srcRect))
+			return FALSE;
+	}
+	return TRUE;
+}
+
+static BOOL sdl_draw_to_window_scaled_rect(SdlContext* sdl, Sint32 windowId, SDL_Surface* screen,
+                                           SDL_Surface* surface, const SDL_Rect& srcRect)
+{
+	SDL_Rect dstRect = srcRect;
+	sdl_scale_coordinates(sdl, windowId, &dstRect.x, &dstRect.y, FALSE, TRUE);
+	sdl_scale_coordinates(sdl, windowId, &dstRect.w, &dstRect.h, FALSE, TRUE);
+	SDL_SetClipRect(surface, &srcRect);
+	SDL_SetClipRect(screen, &dstRect);
+	SDL_BlitScaled(surface, &srcRect, screen, &dstRect);
+
+	return TRUE;
+}
+
+static BOOL sdl_draw_to_window_scaled_rect(SdlContext* sdl, Sint32 windowId, SDL_Surface* screen,
+                                           SDL_Surface* surface,
+                                           const std::vector<SDL_Rect>& rects = {})
+{
+	if (rects.empty())
+	{
+		return sdl_draw_to_window_scaled_rect(sdl, windowId, screen, surface,
+		                                      { 0, 0, surface->w, surface->h });
+	}
+	for (auto& srcRect : rects)
+	{
+		if (!sdl_draw_to_window_scaled_rect(sdl, windowId, screen, surface, srcRect))
+			return FALSE;
+	}
+	return TRUE;
+}
+
+static BOOL sdl_draw_to_window(SdlContext* sdl, sdl_window_t window,
+                               const std::vector<SDL_Rect>& rects = {})
+{
+	WINPR_ASSERT(sdl);
+
+	auto context = sdl->context();
+	auto gdi = context->gdi;
+
+	SDL_Surface* screen = SDL_GetWindowSurface(window.window);
+
+	int w, h;
+	SDL_GetWindowSize(window.window, &w, &h);
+
+	if (!freerdp_settings_get_bool(context->settings, FreeRDP_SmartSizing))
+	{
+		if (gdi->width < w)
+		{
+			window.offset_x = (w - gdi->width) / 2;
+		}
+		if (gdi->height < h)
+		{
+			window.offset_y = (h - gdi->height) / 2;
+		}
+
+		auto surface = sdl->primary.get();
+		if (!sdl_draw_to_window_rect(sdl, screen, surface, { window.offset_x, window.offset_y },
+		                             rects))
+			return FALSE;
+	}
+	else
+	{
+		auto id = SDL_GetWindowID(window.window);
+
+		if (!sdl_draw_to_window_scaled_rect(sdl, id, screen, sdl->primary.get(), rects))
+			return FALSE;
+	}
+	SDL_UpdateWindowSurface(window.window);
+	return TRUE;
+}
+
+static BOOL sdl_draw_to_window(SdlContext* sdl, const std::vector<sdl_window_t>& window,
+                               const std::vector<SDL_Rect>& rects = {})
+{
+	for (auto& window : sdl->windows)
+	{
+		if (!sdl_draw_to_window(sdl, window, rects))
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
 static BOOL sdl_end_paint_process(rdpContext* context)
 {
 	rdpGdi* gdi;
@@ -348,57 +456,14 @@ static BOOL sdl_end_paint_process(rdpContext* context)
 	if (ninvalid < 1)
 		return TRUE;
 
-	// TODO: Support multiple windows
-	for (auto& window : sdl->windows)
+	std::vector<SDL_Rect> rects;
+	for (INT32 x = 0; x < ninvalid; x++)
 	{
-		SDL_Surface* screen = SDL_GetWindowSurface(window.window);
-
-		int w, h;
-		SDL_GetWindowSize(window.window, &w, &h);
-
-		window.offset_x = 0;
-		window.offset_y = 0;
-		if (!freerdp_settings_get_bool(context->settings, FreeRDP_SmartSizing))
-		{
-			if (gdi->width < w)
-			{
-				window.offset_x = (w - gdi->width) / 2;
-			}
-			if (gdi->height < h)
-			{
-				window.offset_y = (h - gdi->height) / 2;
-			}
-
-			for (INT32 i = 0; i < ninvalid; i++)
-			{
-				const GDI_RGN* rgn = &cinvalid[i];
-				const SDL_Rect srcRect = { rgn->x, rgn->y, rgn->w, rgn->h };
-				SDL_Rect dstRect = { window.offset_x + rgn->x, window.offset_y + rgn->y, rgn->w,
-					                 rgn->h };
-				SDL_SetClipRect(sdl->primary.get(), &srcRect);
-				SDL_SetClipRect(screen, &dstRect);
-				SDL_BlitSurface(sdl->primary.get(), &srcRect, screen, &dstRect);
-			}
-		}
-		else
-		{
-			auto id = SDL_GetWindowID(window.window);
-			for (INT32 i = 0; i < ninvalid; i++)
-			{
-				const GDI_RGN* rgn = &cinvalid[i];
-				const SDL_Rect srcRect = { rgn->x, rgn->y, rgn->w, rgn->h };
-				SDL_Rect dstRect = srcRect;
-				sdl_scale_coordinates(sdl, id, &dstRect.x, &dstRect.y, FALSE, TRUE);
-				sdl_scale_coordinates(sdl, id, &dstRect.w, &dstRect.h, FALSE, TRUE);
-				SDL_SetClipRect(sdl->primary.get(), &srcRect);
-				SDL_SetClipRect(screen, &dstRect);
-				SDL_BlitScaled(sdl->primary.get(), &srcRect, screen, &dstRect);
-			}
-		}
-		SDL_UpdateWindowSurface(window.window);
+		auto& rgn = cinvalid[x];
+		rects.push_back({ rgn.x, rgn.y, rgn.w, rgn.h });
 	}
 
-	return TRUE;
+	return sdl_draw_to_window(sdl, sdl->windows, rects);
 }
 
 /* This function is called when the library completed composing a new
@@ -504,7 +569,6 @@ static BOOL sdl_pre_connect(freerdp* instance)
 	WINPR_ASSERT(instance->context);
 
 	auto sdl = get_context(instance->context);
-	sdl->highDpi = TRUE; // If High DPI is available, we want unscaled data, RDP can scale itself.
 
 	auto settings = instance->context->settings;
 	WINPR_ASSERT(settings);
@@ -608,34 +672,66 @@ static BOOL sdl_create_windows(SdlContext* sdl)
 {
 	WINPR_ASSERT(sdl);
 
-	auto title = sdl_window_get_title(sdl->context()->settings);
+	auto settings = sdl->context()->settings;
+	auto title = sdl_window_get_title(settings);
 	BOOL rc = FALSE;
 
-	// TODO: Multimonitor setup
-	const size_t windowCount = 1;
+	UINT32 windowCount = freerdp_settings_get_uint32(settings, FreeRDP_MonitorCount);
 
-	const UINT32 w = freerdp_settings_get_uint32(sdl->context()->settings, FreeRDP_DesktopWidth);
-	const UINT32 h = freerdp_settings_get_uint32(sdl->context()->settings, FreeRDP_DesktopHeight);
-
-	for (size_t x = 0; x < windowCount; x++)
+	for (UINT32 x = 0; x < windowCount; x++)
 	{
+		auto monitor = static_cast<rdpMonitor*>(
+		    freerdp_settings_get_pointer_array_writable(settings, FreeRDP_MonitorDefArray, x));
+
+		Uint32 w = monitor->width;
+		Uint32 h = monitor->height;
+		if (!(settings->UseMultimon || settings->Fullscreen))
+		{
+			w = settings->DesktopWidth;
+			h = settings->DesktopHeight;
+		}
+
 		sdl_window_t window = {};
 		Uint32 flags = SDL_WINDOW_SHOWN;
+		Uint32 startupX = SDL_WINDOWPOS_CENTERED_DISPLAY(x);
+		Uint32 startupY = SDL_WINDOWPOS_CENTERED_DISPLAY(x);
 
-		if (sdl->highDpi)
+		if (monitor->attributes.desktopScaleFactor > 100)
 		{
 #if SDL_VERSION_ATLEAST(2, 0, 1)
 			flags |= SDL_WINDOW_ALLOW_HIGHDPI;
 #endif
 		}
 
-		if (sdl->context()->settings->Fullscreen || sdl->context()->settings->UseMultimon)
+		if (settings->Fullscreen && !settings->UseMultimon)
+		{
 			flags |= SDL_WINDOW_FULLSCREEN;
+		}
 
-		window.window = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-		                                 static_cast<int>(w), static_cast<int>(h), flags);
+		if (settings->UseMultimon)
+		{
+			flags |= SDL_WINDOW_BORDERLESS;
+		}
+		else
+		{
+			window.offset_x = 0;
+			window.offset_y = 0;
+		}
+
+		window.window = SDL_CreateWindow(title, startupX, startupY, static_cast<int>(w),
+		                                 static_cast<int>(h), flags);
 		if (!window.window)
 			goto fail;
+
+		if (settings->UseMultimon)
+		{
+			int win_x;
+			int win_y;
+			SDL_GetWindowPosition(window.window, &win_x, &win_y);
+			window.offset_x = 0 - win_x;
+			window.offset_y = 0 - win_y;
+		}
+
 		sdl->windows.push_back(window);
 	}
 
@@ -681,13 +777,29 @@ static int sdl_run(SdlContext* sdl)
 	}
 
 	SDL_Init(SDL_INIT_VIDEO);
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+	SDL_SetHint(SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED, "0");
+#endif
+
 	sdl->initialized.set();
 
 	while (!freerdp_shall_disconnect_context(sdl->context()))
 	{
 		SDL_Event windowEvent = { 0 };
-		while (!freerdp_shall_disconnect_context(sdl->context()) && SDL_WaitEvent(&windowEvent))
+		while (!freerdp_shall_disconnect_context(sdl->context()) &&
+		       SDL_WaitEventTimeout(nullptr, 1000))
 		{
+			/* Only poll standard SDL events and SDL_USEREVENTS meant to create dialogs.
+			 * do not process the dialog return value events here.
+			 */
+			const int prc = SDL_PeepEvents(&windowEvent, 1, SDL_GETEVENT, SDL_FIRSTEVENT,
+			                               SDL_USEREVENT_SCARD_DIALOG);
+			if (prc < 0)
+			{
+				if (sdl_log_error(prc, sdl->log, "SDL_PeepEvents"))
+					continue;
+			}
+
 #if defined(WITH_DEBUG_SDL_EVENTS)
 			SDL_Log("got event %s [0x%08" PRIx32 "]", sdl_event_type_str(windowEvent.type),
 			        windowEvent.type);
@@ -758,6 +870,31 @@ static int sdl_run(SdlContext* sdl)
 				{
 					const SDL_WindowEvent* ev = &windowEvent.window;
 					sdl->disp.handle_window_event(ev);
+
+					switch (ev->event)
+					{
+						case SDL_WINDOWEVENT_RESIZED:
+						case SDL_WINDOWEVENT_SIZE_CHANGED:
+						{
+							auto window = SDL_GetWindowFromID(ev->windowID);
+
+							if (window)
+							{
+								auto surface = SDL_GetWindowSurface(window);
+								if (surface)
+								{
+									SDL_Rect rect = { 0, 0, surface->w, surface->h };
+
+									auto color = SDL_MapRGBA(surface->format, 0, 0, 0, 0xff);
+									SDL_FillRect(surface, &rect, color);
+								}
+								sdl_draw_to_window(sdl, sdl->windows);
+							}
+						}
+						break;
+						default:
+							break;
+					}
 				}
 				break;
 
@@ -769,6 +906,31 @@ static int sdl_run(SdlContext* sdl)
 					break;
 				case SDL_APP_WILLENTERFOREGROUND:
 					sdl_redraw(sdl);
+					break;
+				case SDL_USEREVENT_CERT_DIALOG:
+				{
+					auto title = static_cast<const char*>(windowEvent.user.data1);
+					auto msg = static_cast<const char*>(windowEvent.user.data2);
+					sdl_cert_dialog_show(title, msg);
+				}
+				break;
+				case SDL_USEREVENT_SHOW_DIALOG:
+				{
+					auto title = static_cast<const char*>(windowEvent.user.data1);
+					auto msg = static_cast<const char*>(windowEvent.user.data2);
+					sdl_message_dialog_show(title, msg, windowEvent.user.code);
+				}
+				break;
+				case SDL_USEREVENT_SCARD_DIALOG:
+				{
+					auto title = static_cast<const char*>(windowEvent.user.data1);
+					auto msg = static_cast<const char**>(windowEvent.user.data2);
+					sdl_scard_dialog_show(title, windowEvent.user.code, msg);
+				}
+				break;
+				case SDL_USEREVENT_AUTH_DIALOG:
+					sdl_auth_dialog_show(
+					    reinterpret_cast<const SDL_UserAuthArg*>(windowEvent.padding));
 					break;
 				case SDL_USEREVENT_UPDATE:
 				{
@@ -795,14 +957,42 @@ static int sdl_run(SdlContext* sdl)
 					const SDL_bool enter = windowEvent.user.code != 0 ? SDL_TRUE : SDL_FALSE;
 
 					Uint32 curFlags = SDL_GetWindowFlags(window);
-					const BOOL isSet = (curFlags & SDL_WINDOW_FULLSCREEN);
-					if (enter)
-						curFlags |= SDL_WINDOW_FULLSCREEN;
-					else
-						curFlags &= ~SDL_WINDOW_FULLSCREEN;
 
-					if ((enter && !isSet) || (!enter && isSet))
-						SDL_SetWindowFullscreen(window, curFlags);
+					if (enter)
+					{
+						if (!(curFlags & SDL_WINDOW_BORDERLESS))
+						{
+							auto idx = SDL_GetWindowDisplayIndex(window);
+							SDL_DisplayMode mode = {};
+							SDL_GetCurrentDisplayMode(idx, &mode);
+
+							SDL_RestoreWindow(window); // Maximize so we can see the caption and
+							                           // bits
+							SDL_SetWindowBordered(window, SDL_FALSE);
+							SDL_SetWindowPosition(window, 0, 0);
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+							SDL_SetWindowAlwaysOnTop(window, SDL_TRUE);
+#endif
+							SDL_RaiseWindow(window);
+							SDL_SetWindowSize(window, mode.w, mode.h);
+						}
+					}
+					else
+					{
+						if (curFlags & SDL_WINDOW_BORDERLESS)
+						{
+
+							SDL_SetWindowBordered(window, SDL_TRUE);
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+							SDL_SetWindowAlwaysOnTop(window, SDL_FALSE);
+#endif
+							SDL_RaiseWindow(window);
+							SDL_MinimizeWindow(
+							    window); // Maximize so we can see the caption and bits
+							SDL_MaximizeWindow(
+							    window); // Maximize so we can see the caption and bits
+						}
+					}
 				}
 				break;
 				case SDL_USEREVENT_POINTER_NULL:
@@ -1105,20 +1295,6 @@ static void sdl_client_global_uninit(void)
 #endif
 }
 
-static int sdl_logon_error_info(freerdp* instance, UINT32 data, UINT32 type)
-{
-	const char* str_data = freerdp_get_logon_error_info_data(data);
-	const char* str_type = freerdp_get_logon_error_info_type(type);
-
-	if (!instance || !instance->context)
-		return -1;
-
-	auto sdl = get_context(instance->context);
-	WLog_Print(sdl->log, WLOG_INFO, "Logon Error Info %s [%s]", str_data, str_type);
-
-	return 1;
-}
-
 static BOOL sdl_client_new(freerdp* instance, rdpContext* context)
 {
 	auto sdl = reinterpret_cast<sdl_rdp_context*>(context);
@@ -1134,14 +1310,16 @@ static BOOL sdl_client_new(freerdp* instance, rdpContext* context)
 	instance->PostConnect = sdl_post_connect;
 	instance->PostDisconnect = sdl_post_disconnect;
 	instance->PostFinalDisconnect = sdl_post_final_disconnect;
-	instance->AuthenticateEx = client_cli_authenticate_ex;
-	instance->VerifyCertificateEx = client_cli_verify_certificate_ex;
-	instance->VerifyChangedCertificateEx = client_cli_verify_changed_certificate_ex;
+	instance->AuthenticateEx = sdl_authenticate_ex;
+	instance->VerifyCertificateEx = sdl_verify_certificate_ex;
+	instance->VerifyChangedCertificateEx = sdl_verify_changed_certificate_ex;
 	instance->LogonErrorInfo = sdl_logon_error_info;
+	instance->PresentGatewayMessage = sdl_present_gateway_message;
+
 #ifdef WITH_WEBVIEW
-	instance->GetAadAuthCode = sdl_webview_get_aad_auth_code;
+	instance->GetAccessToken = sdl_webview_get_access_token;
 #else
-	instance->GetAadAuthCode = client_cli_get_aad_auth_code;
+	instance->GetAccessToken = client_cli_get_access_token;
 #endif
 	/* TODO: Client display set up */
 
@@ -1205,6 +1383,121 @@ static void context_free(sdl_rdp_context* sdl)
 		freerdp_client_context_free(&sdl->common.context);
 }
 
+static const char* category2str(int category)
+{
+	switch (category)
+	{
+		case SDL_LOG_CATEGORY_APPLICATION:
+			return "SDL_LOG_CATEGORY_APPLICATION";
+		case SDL_LOG_CATEGORY_ERROR:
+			return "SDL_LOG_CATEGORY_ERROR";
+		case SDL_LOG_CATEGORY_ASSERT:
+			return "SDL_LOG_CATEGORY_ASSERT";
+		case SDL_LOG_CATEGORY_SYSTEM:
+			return "SDL_LOG_CATEGORY_SYSTEM";
+		case SDL_LOG_CATEGORY_AUDIO:
+			return "SDL_LOG_CATEGORY_AUDIO";
+		case SDL_LOG_CATEGORY_VIDEO:
+			return "SDL_LOG_CATEGORY_VIDEO";
+		case SDL_LOG_CATEGORY_RENDER:
+			return "SDL_LOG_CATEGORY_RENDER";
+		case SDL_LOG_CATEGORY_INPUT:
+			return "SDL_LOG_CATEGORY_INPUT";
+		case SDL_LOG_CATEGORY_TEST:
+			return "SDL_LOG_CATEGORY_TEST";
+		case SDL_LOG_CATEGORY_RESERVED1:
+			return "SDL_LOG_CATEGORY_RESERVED1";
+		case SDL_LOG_CATEGORY_RESERVED2:
+			return "SDL_LOG_CATEGORY_RESERVED2";
+		case SDL_LOG_CATEGORY_RESERVED3:
+			return "SDL_LOG_CATEGORY_RESERVED3";
+		case SDL_LOG_CATEGORY_RESERVED4:
+			return "SDL_LOG_CATEGORY_RESERVED4";
+		case SDL_LOG_CATEGORY_RESERVED5:
+			return "SDL_LOG_CATEGORY_RESERVED5";
+		case SDL_LOG_CATEGORY_RESERVED6:
+			return "SDL_LOG_CATEGORY_RESERVED6";
+		case SDL_LOG_CATEGORY_RESERVED7:
+			return "SDL_LOG_CATEGORY_RESERVED7";
+		case SDL_LOG_CATEGORY_RESERVED8:
+			return "SDL_LOG_CATEGORY_RESERVED8";
+		case SDL_LOG_CATEGORY_RESERVED9:
+			return "SDL_LOG_CATEGORY_RESERVED9";
+		case SDL_LOG_CATEGORY_RESERVED10:
+			return "SDL_LOG_CATEGORY_RESERVED10";
+		case SDL_LOG_CATEGORY_CUSTOM:
+		default:
+			return "SDL_LOG_CATEGORY_CUSTOM";
+	}
+}
+
+static SDL_LogPriority wloglevel2dl(DWORD level)
+{
+	switch (level)
+	{
+		case WLOG_TRACE:
+			return SDL_LOG_PRIORITY_VERBOSE;
+		case WLOG_DEBUG:
+			return SDL_LOG_PRIORITY_DEBUG;
+		case WLOG_INFO:
+			return SDL_LOG_PRIORITY_INFO;
+		case WLOG_WARN:
+			return SDL_LOG_PRIORITY_WARN;
+		case WLOG_ERROR:
+			return SDL_LOG_PRIORITY_ERROR;
+		case WLOG_FATAL:
+			return SDL_LOG_PRIORITY_CRITICAL;
+		case WLOG_OFF:
+		default:
+			return SDL_LOG_PRIORITY_VERBOSE;
+	}
+}
+
+static DWORD sdlpriority2wlog(SDL_LogPriority priority)
+{
+	DWORD level = WLOG_OFF;
+	switch (priority)
+	{
+		case SDL_LOG_PRIORITY_VERBOSE:
+			level = WLOG_TRACE;
+			break;
+		case SDL_LOG_PRIORITY_DEBUG:
+			level = WLOG_DEBUG;
+			break;
+		case SDL_LOG_PRIORITY_INFO:
+			level = WLOG_INFO;
+			break;
+		case SDL_LOG_PRIORITY_WARN:
+			level = WLOG_WARN;
+			break;
+		case SDL_LOG_PRIORITY_ERROR:
+			level = WLOG_ERROR;
+			break;
+		case SDL_LOG_PRIORITY_CRITICAL:
+			level = WLOG_FATAL;
+			break;
+		default:
+			break;
+	}
+
+	return level;
+}
+
+static void SDLCALL winpr_LogOutputFunction(void* userdata, int category, SDL_LogPriority priority,
+                                            const char* message)
+{
+	auto sdl = static_cast<SdlContext*>(userdata);
+	WINPR_ASSERT(sdl);
+
+	const DWORD level = sdlpriority2wlog(priority);
+	auto log = sdl->log;
+	if (!WLog_IsLevelActive(log, level))
+		return;
+
+	WLog_PrintMessage(log, WLOG_MESSAGE_TEXT, level, __LINE__, __FILE__, __func__, "[%s] %s",
+	                  category2str(category), message);
+}
+
 int main(int argc, char* argv[])
 {
 	int rc = -1;
@@ -1233,6 +1526,10 @@ int main(int argc, char* argv[])
 			sdl_list_monitors(sdl);
 		return rc;
 	}
+
+	SDL_LogSetOutputFunction(winpr_LogOutputFunction, sdl);
+	auto level = WLog_GetLogLevel(sdl->log);
+	SDL_LogSetAllPriority(wloglevel2dl(level));
 
 	auto context = sdl->context();
 	WINPR_ASSERT(context);

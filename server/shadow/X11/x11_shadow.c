@@ -1116,9 +1116,9 @@ static int x11_shadow_xshm_init(x11ShadowSubsystem* subsystem)
 		return -1;
 	}
 
-	subsystem->fb_shm_info.shmid =
-	    shmget(IPC_PRIVATE, subsystem->fb_image->bytes_per_line * subsystem->fb_image->height,
-	           IPC_CREAT | 0600);
+	subsystem->fb_shm_info.shmid = shmget(
+	    IPC_PRIVATE, 1ull * subsystem->fb_image->bytes_per_line * subsystem->fb_image->height,
+	    IPC_CREAT | 0600);
 
 	if (subsystem->fb_shm_info.shmid == -1)
 	{
@@ -1333,7 +1333,7 @@ static int x11_shadow_subsystem_init(rdpShadowSubsystem* sub)
 	subsystem->cursorMaxWidth = 256;
 	subsystem->cursorMaxHeight = 256;
 	subsystem->cursorPixels =
-	    winpr_aligned_malloc(subsystem->cursorMaxWidth * subsystem->cursorMaxHeight * 4, 16);
+	    winpr_aligned_malloc(subsystem->cursorMaxWidth * subsystem->cursorMaxHeight * 4ull, 16);
 
 	if (!subsystem->cursorPixels)
 		return -1;
@@ -1483,7 +1483,12 @@ static void x11_shadow_subsystem_free(rdpShadowSubsystem* subsystem)
 	free(subsystem);
 }
 
-FREERDP_API int X11_ShadowSubsystemEntry(RDP_SHADOW_ENTRY_POINTS* pEntryPoints)
+FREERDP_ENTRY_POINT(FREERDP_API const char* ShadowSubsystemName(void))
+{
+	return "X11";
+}
+
+FREERDP_ENTRY_POINT(FREERDP_API int ShadowSubsystemEntry(RDP_SHADOW_ENTRY_POINTS* pEntryPoints))
 {
 	if (!pEntryPoints)
 		return -1;

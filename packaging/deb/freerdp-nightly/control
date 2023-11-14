@@ -13,7 +13,7 @@ Build-Depends:
  docbook-xsl,
  xsltproc,
  ninja-build,
- libkrb5-dev,
+ libkrb5-dev | krb5-multidev | heimdal-multidev,
  libxkbcommon-dev,
  libxkbfile-dev,
  libx11-dev,
@@ -32,10 +32,11 @@ Build-Depends:
  libcairo2-dev,
  libpcsclite-dev,
  libasound2-dev,
+ libswscale-dev,
  libpulse-dev, 
  libavcodec-dev,
  libavutil-dev,
- libfuse-dev | libfuse3-dev,
+ libfuse3-dev,
  libswresample-dev | libavresample-dev,
  libusb-1.0-0-dev,
  libudev-dev,
@@ -46,6 +47,11 @@ Build-Depends:
  libcjson-dev,
  libsdl2-2.0-0,
  libsdl2-dev,
+ libsdl2-ttf-dev,
+ libsystemd-dev,
+ libpkcs11-helper1-dev,
+ libwebkit2gtk-4.0-dev,
+ liburiparser-dev
 Standards-Version: 3.9.5
 Homepage: http://www.freerdp.com/
 Vcs-Browser: http://github.com/FreeRDP/FreeRDP.git

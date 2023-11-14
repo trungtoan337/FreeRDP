@@ -313,7 +313,7 @@ static BOOL xf_Pointer_GetCursorForCurrentScale(rdpContext* context, rdpPointer*
 		ci.height = yTargetSize;
 		ci.xhot = pointer->xPos * xscale;
 		ci.yhot = pointer->yPos * yscale;
-		const size_t size = ci.height * ci.width * FreeRDPGetBytesPerPixel(CursorFormat) * 1ULL;
+		const size_t size = 1ull * ci.height * ci.width * FreeRDPGetBytesPerPixel(CursorFormat);
 
 		void* tmp = winpr_aligned_malloc(size, 16);
 		if (!tmp)
@@ -427,7 +427,7 @@ static BOOL xf_Pointer_New(rdpContext* context, rdpPointer* pointer)
 	xpointer->nCursors = 0;
 	xpointer->mCursors = 0;
 
-	size = pointer->height * pointer->width * FreeRDPGetBytesPerPixel(CursorFormat) * 1ULL;
+	size = 1ull * pointer->height * pointer->width * FreeRDPGetBytesPerPixel(CursorFormat);
 
 	if (!(xpointer->cursorPixels = (XcursorPixel*)winpr_aligned_malloc(size, 16)))
 		goto fail;
@@ -573,7 +573,7 @@ static BOOL xf_Pointer_SetPosition(rdpContext* context, UINT32 x, UINT32 y)
 	}
 
 	WLog_DBG(TAG, "%" PRIu32 "x%" PRIu32, x, y);
-	if (xfc->remote_app && !xfc->focused)
+	if (!xfc->focused)
 		return TRUE;
 
 	xf_adjust_coordinates_to_screen(xfc, &x, &y);
@@ -596,7 +596,7 @@ static BOOL xf_Pointer_SetPosition(rdpContext* context, UINT32 x, UINT32 y)
 		goto out;
 	}
 
-	rc = XWarpPointer(xfc->display, None, handle, 0, 0, 0, 0, x, y);
+	rc = XWarpPointer(xfc->display, handle, handle, 0, 0, 0, 0, x, y);
 	if (rc == 0)
 		WLog_WARN(TAG, "XWarpPointer==%d", rc);
 	tmp.event_mask = current.your_event_mask;
@@ -723,20 +723,16 @@ static BOOL xf_Glyph_EndDraw(rdpContext* context, INT32 x, INT32 y, INT32 width,
 /* Graphics Module */
 BOOL xf_register_pointer(rdpGraphics* graphics)
 {
-	rdpPointer* pointer = NULL;
+	rdpPointer pointer = { 0 };
 
-	if (!(pointer = (rdpPointer*)calloc(1, sizeof(rdpPointer))))
-		return FALSE;
-
-	pointer->size = sizeof(xfPointer);
-	pointer->New = xf_Pointer_New;
-	pointer->Free = xf_Pointer_Free;
-	pointer->Set = xf_Pointer_Set;
-	pointer->SetNull = xf_Pointer_SetNull;
-	pointer->SetDefault = xf_Pointer_SetDefault;
-	pointer->SetPosition = xf_Pointer_SetPosition;
-	graphics_register_pointer(graphics, pointer);
-	free(pointer);
+	pointer.size = sizeof(xfPointer);
+	pointer.New = xf_Pointer_New;
+	pointer.Free = xf_Pointer_Free;
+	pointer.Set = xf_Pointer_Set;
+	pointer.SetNull = xf_Pointer_SetNull;
+	pointer.SetDefault = xf_Pointer_SetDefault;
+	pointer.SetPosition = xf_Pointer_SetPosition;
+	graphics_register_pointer(graphics, &pointer);
 	return TRUE;
 }
 

@@ -43,8 +43,12 @@ static UINT32 ChannelId_Hash(const void* key)
 	return *v;
 }
 
-static BOOL ChannelId_Compare(const UINT32* v1, const UINT32* v2)
+static BOOL ChannelId_Compare(const void* pv1, const void* pv2)
 {
+	const UINT32* v1 = pv1;
+	const UINT32* v2 = pv2;
+	WINPR_ASSERT(v1);
+	WINPR_ASSERT(v2);
 	return (*v1 == *v2);
 }
 
@@ -89,6 +93,12 @@ void StaticChannelContext_free(pServerStaticChannelContext* ctx)
 	free(ctx);
 }
 
+static void HashStaticChannelContext_free(void* ptr)
+{
+	pServerStaticChannelContext* ctx = (pServerStaticChannelContext*)ptr;
+	StaticChannelContext_free(ctx);
+}
+
 /* Proxy context initialization callback */
 static void client_to_proxy_context_free(freerdp_peer* client, rdpContext* ctx);
 static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
@@ -126,10 +136,10 @@ static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
 		goto error;
 
 	obj = HashTable_KeyObject(context->channelsByFrontId);
-	obj->fnObjectEquals = (OBJECT_EQUALS_FN)ChannelId_Compare;
+	obj->fnObjectEquals = ChannelId_Compare;
 
 	obj = HashTable_ValueObject(context->channelsByFrontId);
-	obj->fnObjectFree = (OBJECT_FREE_FN)StaticChannelContext_free;
+	obj->fnObjectFree = HashStaticChannelContext_free;
 
 	context->channelsByBackId = HashTable_New(FALSE);
 	if (!context->channelsByBackId)
@@ -138,7 +148,7 @@ static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
 		goto error;
 
 	obj = HashTable_KeyObject(context->channelsByBackId);
-	obj->fnObjectEquals = (OBJECT_EQUALS_FN)ChannelId_Compare;
+	obj->fnObjectEquals = ChannelId_Compare;
 
 	return TRUE;
 
@@ -302,7 +312,7 @@ proxyData* proxy_data_new(void)
 	if (!(pdata->gfx_server_ready = CreateEvent(NULL, TRUE, FALSE, NULL)))
 		goto error;
 
-	winpr_RAND((BYTE*)&temp, 16);
+	winpr_RAND(&temp, 16);
 	hex = winpr_BinToHexString(temp, 16, FALSE);
 	if (!hex)
 		goto error;
